@@ -156,3 +156,22 @@ test('an exact image prompt is sent without narration details', async ({ page })
   await page.getByRole('button', { name: 'Render with changes' }).click()
   expect((await response).ok()).toBe(true)
 })
+
+test('narrator commentary is retried and excluded from the transcript', async ({ page }) => {
+  const entry = 'You show Mara the key.'
+  const commentary = "The player's recent entry is: 'You show Mara the key.' This means the player wants a reaction."
+  let attempts = 0
+  await page.route('**/api/turn', route => {
+    attempts += 1
+    return route.fulfill({ json: {
+      ...generated, prose: attempts === 1 ? commentary : 'Mara recognizes the notch cut into the key.',
+      scene: { ...generated.scene, focus: 'none' },
+    } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Your move').fill(entry)
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Mara recognizes the notch cut into the key.')).toBeVisible()
+  await expect(page.getByText(commentary, { exact: true })).toHaveCount(0)
+  expect(attempts).toBe(2)
+})

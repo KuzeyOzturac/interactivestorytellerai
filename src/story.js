@@ -75,17 +75,22 @@ export function requestFor(campaign, input) {
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
         'For scene.action, describe the NPC in the middle of the visible action. Specify their pose and gaze, and the size and placement of any object they handle. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked adult" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
-        'Respond with the requested JSON only.',
+        'Respond with the requested JSON only. Put only in-world story prose in the prose field. Omit analysis, references to the player’s entry or prior continuation, planning, and commentary about how you interpreted the scene.',
       ].join(' ') },
       { role: 'user', content: JSON.stringify({
         premise: campaign.world.premise,
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
         summary: current.summary, facts: current.facts, scene: current.scene,
-        recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: prose })),
+        recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
         playerEntry: input,
       }) },
     ],
   }
+}
+
+export function isNarratorCommentary(prose) {
+  if (typeof prose !== 'string') return false
+  return /(?:^|\n|[.!?]\s+)\s*(?:<think>|(?:analysis|reasoning)\s*:|(?:the )?player(?:['’]s) (?:recent |latest |current |previous )?(?:entry|input|action) (?:is|was|means|implies|suggests|indicates)\b|the previous continuation (?:states|says|describes)\b|the scene(?:['’]s current state| state) is\s*:)/i.test(prose)
 }
 
 export function repeatsPlayerEntry(entry, prose) {
@@ -108,6 +113,7 @@ export function addTurn(campaign, id, input, result) {
   const previous = campaign.turns[campaign.active]
   const prose = checkedText(result.prose, 5000)
   if (!prose) throw new Error('The narrator returned an empty passage. Try again.')
+  if (isNarratorCommentary(prose)) throw new Error('The narrator returned commentary instead of story prose. Try the turn again.')
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
   if (scene.focus && scene.focus !== 'none') {

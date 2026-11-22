@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, createCampaign, history, imageRequest, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
+import { addTurn, attachImage, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
 import { readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
@@ -157,10 +157,10 @@ function App() {
     try {
       const request = requestFor(base, action)
       let result = await callModel('turn', request)
-      if (repeatsPlayerEntry(action, result.prose)) {
+      if (repeatsPlayerEntry(action, result.prose) || isNarratorCommentary(result.prose)) {
         const [instructions, ...context] = request.messages
         result = await callModel('turn', { ...request, messages: [
-          { ...instructions, content: instructions.content + ' The previous draft echoed the entry. Begin with a new reaction, consequence, or development that happens after it.' },
+          { ...instructions, content: instructions.content + ' The previous draft included an echo or commentary. Write the next event directly as fiction. Begin with a new reaction, consequence, or development after the entry.' },
           ...context,
         ] })
         if (repeatsPlayerEntry(action, result.prose)) {
