@@ -1,0 +1,60 @@
+import { test, expect } from '@playwright/test'
+import { readFileSync } from 'node:fs'
+
+const image = 'data:image/webp;base64,' + readFileSync(new URL('../public/mara.webp', import.meta.url)).toString('base64')
+const generated = {
+  prose: 'Theo hoists the lantern over the railing.', choices: ['Ask about the light'],
+  scene: { focus: 'theo', location: 'Ferry deck', action: 'Hoists a lantern over the railing', details: 'Fog' },
+  facts: ['Theo showed the player his lantern.'], summary: 'The player boarded the ferry.',
+}
+
+test('adventure renders scene art, remembers facts after reload, and rewinds', async ({ page }) => {
+  await page.route('**/api/turn', route => route.fulfill({ json: generated }))
+  await page.route('**/api/image', async route => {
+    const { prompt } = route.request().postDataJSON()
+    expect(prompt).toContain('Hoists a lantern over the railing')
+    expect(prompt).toContain('Ferry deck')
+    expect(prompt).toContain('exactly one visible person')
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('img', { name: /Mara Venn/ })).toBeVisible()
+  await page.getByLabel('Your move').fill('Board the ferry and ask Theo about his light')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText(generated.prose)).toBeVisible()
+  await expect(page.getByRole('img', { name: /Theo Rusk.*Hoists/ })).toBeVisible()
+  await page.reload()
+  await expect(page.getByText(generated.prose)).toBeVisible()
+  await page.getByRole('button', { name: 'Journal' }).click()
+  await expect(page.getByLabel('Remembered facts')).toHaveValue(generated.facts[0])
+  await page.getByRole('button', { name: 'Close dialog' }).click()
+  await page.getByRole('button', { name: 'Rewind' }).click()
+  await expect(page.getByRole('img', { name: /Mara Venn/ })).toBeVisible()
+  await expect(page.getByLabel('Existing branches')).toBeVisible()
+})
+
+test('mobile layout fits and a failed model request preserves the action', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.route('**/api/turn', route => route.fulfill({ status: 503, json: { error: 'Start Ollama on this computer, then try again.' } }))
+  await page.goto('/')
+  await page.getByLabel('Your move').fill('I take the key')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByRole('alert')).toContainText('Start Ollama')
+  await expect(page.getByLabel('Your move')).toHaveValue('I take the key')
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('world editor creates a new playable campaign', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'New world' }).click()
+  await page.getByLabel('Title').fill('The Hush Signal')
+  await page.getByLabel('World and rules').fill('An attic radio only works during snow.')
+  await page.getByLabel('Opening scene').fill('The radio crackles.')
+  await page.getByLabel('Location', { exact: true }).fill('The attic')
+  await page.getByLabel('Characters').fill('Vera Bell | An adult radio operator with a silver buzz cut')
+  await page.getByLabel('What the opening character is doing').fill('Tunes the radio')
+  await page.getByRole('button', { name: 'Start new campaign' }).click()
+  await expect(page.getByRole('heading', { name: 'The Hush Signal' })).toBeVisible()
+  await expect(page.getByRole('complementary').getByText('Vera Bell', { exact: true })).toBeVisible()
+  await expect(page.getByText('Tunes the radio', { exact: true })).toBeVisible()
+})

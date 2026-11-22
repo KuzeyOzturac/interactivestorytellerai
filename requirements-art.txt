@@ -1,0 +1,5 @@
+torch>=2.5,<3
+diffusers>=0.32,<1
+transformers>=4.48,<5
+accelerate>=1.2,<2
+Pillow>=10,<13
