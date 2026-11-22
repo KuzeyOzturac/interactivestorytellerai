@@ -48,7 +48,7 @@ function App() {
   const [loaded, setLoaded] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [rendering, setRendering] = useState(null)
+  const [rendering, setRendering] = useState([])
   const [error, setError] = useState('')
   const [artError, setArtError] = useState('')
   const [saveError, setSaveError] = useState('')
@@ -56,7 +56,7 @@ function App() {
   const [panel, setPanel] = useState('')
   const dialog = useRef(null)
   const current = useRef(campaign)
-  const activeRender = useRef(null)
+  const activeRenders = useRef(new Map())
   const transcriptEnd = useRef(null)
   const turn = campaign.turns[campaign.active]
   const turns = history(campaign)
@@ -89,9 +89,9 @@ function App() {
     setCampaign(next)
   }
   function replace(next) {
-    activeRender.current?.abort()
-    activeRender.current = null
-    setRendering(null)
+    for (const controller of activeRenders.current.values()) controller.abort()
+    activeRenders.current.clear()
+    setRendering([])
     setArtError('')
     setError('')
     setInput('')
@@ -107,14 +107,13 @@ function App() {
     const id = snapshot.active
     const selected = snapshot.turns[id]
     const request = imageRequest(snapshot.world, selected.scene)
-    if (!request) return
+    if (!request || activeRenders.current.has(id)) return
     if (!request.reference) {
       request.reference = history(snapshot).find(entry => entry.scene.focus === selected.scene.focus && entry.image)?.image || ''
     }
-    activeRender.current?.abort()
     const controller = new AbortController()
-    activeRender.current = controller
-    setRendering(id)
+    activeRenders.current.set(id, controller)
+    setRendering([...activeRenders.current.keys()])
     setArtError('')
     try {
       const response = await fetch('/api/image', {
@@ -128,9 +127,9 @@ function App() {
     } catch (failure) {
       if (!controller.signal.aborted && current.current.active === id) setArtError(failure.message)
     } finally {
-      if (activeRender.current === controller) {
-        activeRender.current = null
-        setRendering(null)
+      if (activeRenders.current.get(id) === controller) {
+        activeRenders.current.delete(id)
+        setRendering([...activeRenders.current.keys()])
       }
     }
   }
@@ -223,10 +222,10 @@ function App() {
           </figcaption>
         </figure>
         {character && <div className="art-controls">
-          <button onClick={() => renderArt(current.current)} disabled={rendering === turn.id || !loaded}><ArrowCounterClockwise size={17}/> {turn.image ? 'Regenerate art' : 'Generate art'}</button>
+          <button onClick={() => renderArt(current.current)} disabled={rendering.includes(turn.id) || !loaded}><ArrowCounterClockwise size={17}/> {turn.image ? 'Regenerate art' : 'Generate art'}</button>
           <label><input type="checkbox" checked={autoArt} onChange={event => { setAutoArt(event.target.checked); localStorage.setItem('nightdraft-auto-art', event.target.checked ? 'on' : 'off') }}/> Auto-illustrate</label>
         </div>}
-        {rendering === turn.id && <p role="status">Rendering this scene locally…</p>}
+        {rendering.includes(turn.id) && <p role="status">Rendering this scene locally…</p>}
         {character && visual && !turn.image && <p className="muted">Showing previously saved character art.</p>}
         {artError && <p role="alert" className="error">{artError}</p>}
       </aside>

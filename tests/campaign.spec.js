@@ -58,3 +58,29 @@ test('world editor creates a new playable campaign', async ({ page }) => {
   await expect(page.getByRole('complementary').getByText('Vera Bell', { exact: true })).toBeVisible()
   await expect(page.getByText('Tunes the radio', { exact: true })).toBeVisible()
 })
+
+test('playing ahead keeps an earlier scene render attached to its own turn', async ({ page }) => {
+  let releaseFirst
+  const firstReady = new Promise(resolve => { releaseFirst = resolve })
+  await page.route('**/api/turn', route => {
+    const input = JSON.parse(route.request().postDataJSON().messages[1].content)
+    return route.fulfill({ json: input.action === 'Board the ferry' ? generated : {
+      ...generated, prose: 'Theo sets the lantern on a crate.',
+      scene: { ...generated.scene, action: 'Sets the lantern on a crate' },
+    } })
+  })
+  await page.route('**/api/image', async route => {
+    if (route.request().postDataJSON().prompt.includes('Hoists')) await firstReady
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Your move').fill('Board the ferry')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Rendering this scene locally…')).toBeVisible()
+  await page.getByLabel('Your move').fill('Step closer')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByRole('img', { name: /Theo Rusk.*Sets/ })).toBeVisible()
+  releaseFirst()
+  await page.getByRole('button', { name: 'Rewind' }).click()
+  await expect(page.getByRole('img', { name: /Theo Rusk.*Hoists/ })).toBeVisible()
+})
