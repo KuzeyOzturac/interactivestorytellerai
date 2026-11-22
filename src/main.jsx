@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, createCampaign, history, imageRequest, requestFor } from './story.js'
+import { addTurn, attachImage, createCampaign, history, imageRequest, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
 import { readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
@@ -67,8 +67,12 @@ function App() {
     let alive = true
     readCampaign().then(saved => {
       if (alive && saved) {
-        current.current = saved
-        setCampaign(saved)
+        const recovered = recoverCharacterIllustrations(saved)
+        current.current = recovered
+        setCampaign(recovered)
+        if (autoArt && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
+          void renderArt(recovered)
+        }
       }
     }).catch(() => alive && setSaveError('Could not load the local save.')).finally(() => alive && setLoaded(true))
     return () => { alive = false }
@@ -141,7 +145,18 @@ function App() {
     setArtError('')
     setInput(action)
     try {
-      const result = await callModel('turn', requestFor(base, action))
+      const request = requestFor(base, action)
+      let result = await callModel('turn', request)
+      if (repeatsPlayerEntry(action, result.prose)) {
+        const [instructions, ...context] = request.messages
+        result = await callModel('turn', { ...request, messages: [
+          { ...instructions, content: instructions.content + ' The previous draft echoed the entry. Begin with a new reaction, consequence, or development that happens after it.' },
+          ...context,
+        ] })
+        if (repeatsPlayerEntry(action, result.prose)) {
+          throw new Error('The narrator repeated your entry. Try the turn again.')
+        }
+      }
       const next = addTurn({ ...current.current, active: base.active }, crypto.randomUUID(), action, result)
       update(next)
       setInput('')
@@ -166,7 +181,7 @@ function App() {
             !Array.isArray(item.facts) || !item.scene || typeof item.scene.location !== 'string') throw new Error()
         history(data, id)
       }
-      replace(data)
+      replace(recoverCharacterIllustrations(data))
     } catch {
       setError('Choose a valid Nightdraft campaign export.')
     }
@@ -213,10 +228,10 @@ function App() {
         </div>
       </section>
       <aside className="scene" aria-labelledby="scene-title">
-        <div className="scene-label"><ImageSquare size={19}/><h2 id="scene-title">Scene illustration</h2></div>
+        <div className="scene-label"><ImageSquare size={19}/><h2 id="scene-title">Character illustration</h2></div>
         <figure>
           {visual ? <img src={asset(visual)} alt={turn.image ? `${character?.name || 'Character'} · ${turn.scene.action}` : `Reference for ${character?.name || 'character'}`}/>
-            : <div className="image-empty"><ImageSquare size={38}/><p>{character ? 'No illustration for this scene yet.' : 'No character in focus.'}</p></div>}
+            : <div className="image-empty"><ImageSquare size={38}/><p>{character ? 'No illustration of this character yet.' : 'No character with you.'}</p></div>}
           <figcaption>
             {character ? <><strong>{character.name}</strong><span>{turn.scene.action}</span></> : <span>{turn.scene.location}</span>}
           </figcaption>
@@ -225,7 +240,7 @@ function App() {
           <button onClick={() => renderArt(current.current)} disabled={rendering.includes(turn.id) || !loaded}><ArrowCounterClockwise size={17}/> {turn.image ? 'Regenerate art' : 'Generate art'}</button>
           <label><input type="checkbox" checked={autoArt} onChange={event => { setAutoArt(event.target.checked); localStorage.setItem('nightdraft-auto-art', event.target.checked ? 'on' : 'off') }}/> Auto-illustrate</label>
         </div>}
-        {rendering.includes(turn.id) && <p role="status">Rendering this scene locally…</p>}
+        {rendering.includes(turn.id) && <p role="status">Drawing the character locally…</p>}
         {character && visual && !turn.image && <p className="muted">Showing previously saved character art.</p>}
         {artError && <p role="alert" className="error">{artError}</p>}
       </aside>

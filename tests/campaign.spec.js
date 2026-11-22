@@ -75,11 +75,48 @@ test('playing ahead keeps an earlier scene render attached to its own turn', asy
   await page.goto('/')
   await page.getByLabel('Your move').fill('Board the ferry')
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByText('Rendering this scene locally…')).toBeVisible()
+  await expect(page.getByText('Drawing the character locally…')).toBeVisible()
   await page.getByLabel('Your move').fill('Step closer')
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByRole('img', { name: /Theo Rusk.*Sets/ })).toBeVisible()
   releaseFirst()
   await page.getByRole('button', { name: 'Rewind' }).click()
   await expect(page.getByRole('img', { name: /Theo Rusk.*Hoists/ })).toBeVisible()
+})
+
+test('a named companion still gets a character illustration when the model omits focus', async ({ page }) => {
+  await page.route('**/api/turn', route => route.fulfill({ json: {
+    ...generated, prose: 'Mara hangs her wet coat by the door.',
+    scene: { focus: '', location: 'Your apartment', action: '', details: '' },
+  } }))
+  await page.route('**/api/image', async route => {
+    const request = route.request().postDataJSON()
+    expect(request.reference).toBe('mara.webp')
+    expect(request.scene.location).toBe('Your apartment')
+    expect(request.scene.action).toContain('hangs her wet coat')
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await expect(page.getByRole('heading', { name: 'Character illustration' })).toBeVisible()
+  await page.getByLabel('Your move').fill('You take Mara to your apartment.')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByRole('img', { name: /Mara Venn.*hangs/ })).toBeVisible()
+})
+
+test('an echoed player entry is retried and only new narration is saved', async ({ page }) => {
+  const entry = 'You set the key on the table.'
+  let attempts = 0
+  await page.route('**/api/turn', route => {
+    attempts += 1
+    return route.fulfill({ json: {
+      ...generated, prose: attempts === 1 ? entry : 'Mara slips the key into her coat.',
+      scene: { ...generated.scene, focus: 'none' },
+    } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Your move').fill(entry)
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('Mara slips the key into her coat.')).toBeVisible()
+  await expect(page.getByText(entry, { exact: true })).toHaveCount(1)
+  expect(attempts).toBe(2)
 })

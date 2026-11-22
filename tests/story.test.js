@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { addTurn, attachImage, createCampaign, history, imageRequest, requestFor } from '../src/story.js'
+import { addTurn, attachImage, createCampaign, history, imageRequest, recoverCharacterIllustrations, requestFor } from '../src/story.js'
 
 const result = (campaign, overrides = {}) => ({
   prose: 'You watch Mara turn to the window.', choices: ['Wait'],
@@ -68,4 +68,21 @@ test('the exact player narration and resulting scene carry into the next turn', 
   assert.equal(context.scene.location, 'Your apartment')
   assert.equal(context.scene.focus, 'mara')
   assert.match(request.messages[0].content, /Continue immediately after it/)
+})
+
+test('a saved apartment turn recovers Mara, and an explicitly solo turn stays solo', () => {
+  const start = createCampaign()
+  const apartment = addTurn(start, 'apartment', 'You take Mara to your apartment.', result(start, {
+    prose: 'Mara hangs her wet coat by the door.',
+    scene: { location: 'Your apartment', focus: 'mara', action: '', details: '' },
+  }))
+  apartment.turns.apartment.scene.focus = ''
+  const recovered = recoverCharacterIllustrations(apartment)
+  assert.equal(recovered.turns.apartment.scene.focus, 'mara')
+  assert.match(recovered.turns.apartment.scene.action, /hangs her wet coat/)
+  const solo = addTurn(recovered, 'solo', 'You leave Mara behind and walk home alone.', result(recovered, {
+    prose: 'Mara waves goodbye.',
+    scene: { location: 'Outside', focus: 'none', action: '', details: '' },
+  }))
+  assert.equal(imageRequest(solo.world, recoverCharacterIllustrations(solo).turns.solo.scene), null)
 })
