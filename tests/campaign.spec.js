@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 
 const image = 'data:image/webp;base64,' + readFileSync(new URL('../public/mara.webp', import.meta.url)).toString('base64')
 const generated = {
-  prose: 'Theo hoists the lantern over the railing.', choices: ['Ask about the light'],
+  prose: 'You board the ferry. Theo hoists the lantern over the railing.', choices: ['Ask about the light'],
   scene: { focus: 'theo', location: 'Ferry deck', action: 'Hoists a lantern over the railing', details: 'Fog' },
   facts: ['Theo showed the player his lantern.'], summary: 'The player boarded the ferry.',
 }
@@ -11,10 +11,9 @@ const generated = {
 test('adventure renders scene art, remembers facts after reload, and rewinds', async ({ page }) => {
   await page.route('**/api/turn', route => route.fulfill({ json: generated }))
   await page.route('**/api/image', async route => {
-    const { prompt } = route.request().postDataJSON()
-    expect(prompt).toContain('Hoists a lantern over the railing')
-    expect(prompt).toContain('Ferry deck')
-    expect(prompt).toContain('exactly one visible person')
+    const { scene } = route.request().postDataJSON()
+    expect(scene.action).toBe('Hoists a lantern over the railing')
+    expect(scene.location).toBe('Ferry deck')
     await route.fulfill({ json: { image } })
   })
   await page.goto('/')
@@ -65,12 +64,12 @@ test('playing ahead keeps an earlier scene render attached to its own turn', asy
   await page.route('**/api/turn', route => {
     const input = JSON.parse(route.request().postDataJSON().messages[1].content)
     return route.fulfill({ json: input.action === 'Board the ferry' ? generated : {
-      ...generated, prose: 'Theo sets the lantern on a crate.',
+      ...generated, prose: 'You step closer. Theo sets the lantern on a crate.',
       scene: { ...generated.scene, action: 'Sets the lantern on a crate' },
     } })
   })
   await page.route('**/api/image', async route => {
-    if (route.request().postDataJSON().prompt.includes('Hoists')) await firstReady
+    if (route.request().postDataJSON().scene.action.includes('Hoists')) await firstReady
     await route.fulfill({ json: { image } })
   })
   await page.goto('/')

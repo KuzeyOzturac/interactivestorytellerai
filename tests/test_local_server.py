@@ -5,6 +5,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 from unittest.mock import patch
+from types import SimpleNamespace
 
 import local_server
 
@@ -48,6 +49,33 @@ class LocalRoutesTest(unittest.TestCase):
             urlopen(request, timeout=5)
         self.assertEqual(error.exception.code, 400)
         self.assertIn("Invalid request", json.load(error.exception)["error"])
+
+
+class ScenePromptTest(unittest.TestCase):
+    def test_both_tokenizers_keep_action_and_location_in_budget(self):
+        class Tokenizer:
+            model_max_length = 77
+
+            def __init__(self, tokens_per_word):
+                self.tokens_per_word = tokens_per_word
+
+            def __call__(self, text, add_special_tokens=True, verbose=False):
+                count = len(text.split()) * self.tokens_per_word + (2 if add_special_tokens else 0)
+                return SimpleNamespace(input_ids=[0] * count)
+
+        tokenizers = (Tokenizer(1), Tokenizer(2))
+        scene = {
+            "action": "Walks down the apartment steps " + "extra " * 50,
+            "location": "Rainy apartment entrance",
+            "details": "White knuckles on a brass key " + "extra " * 50,
+            "appearance": "Dark bob, tan raincoat " + "extra " * 50,
+        }
+        prompt = local_server.scene_prompt(scene, tokenizers)
+        for fragment in ("Solo character", "Walks down the apartment steps",
+                         "Rainy apartment entrance", "White knuckles", "Dark bob"):
+            self.assertIn(fragment, prompt)
+        for tokenizer in tokenizers:
+            self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
 
 if __name__ == "__main__":

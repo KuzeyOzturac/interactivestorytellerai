@@ -37,6 +37,26 @@ def narrate(data):
         raise RuntimeError("The local model returned an incomplete turn. Try again.") from error
 
 
+def scene_prompt(scene, tokenizers):
+    # Leave room for separators and special tokens in both SDXL encoders.
+    prefix = "Solo character, medium-wide shot"
+    pieces = [prefix]
+    for field, budget in (("action", 20), ("location", 12), ("details", 10), ("appearance", 17)):
+        words = scene[field].split()
+        while words and not all(
+            len(tokenizer(" ".join(words), add_special_tokens=False, verbose=False).input_ids) <= budget
+            and len(tokenizer(", ".join([*pieces, " ".join(words)]), verbose=False).input_ids) <= tokenizer.model_max_length
+            for tokenizer in tokenizers
+        ):
+            words.pop()
+        if words:
+            pieces.append(" ".join(words).rstrip(",."))
+    style = ", ".join([*pieces, "cinematic painterly illustration"])
+    if all(len(tokenizer(style, verbose=False).input_ids) <= tokenizer.model_max_length for tokenizer in tokenizers):
+        return style
+    return ", ".join(pieces)
+
+
 def illustrate(data):
     global PIPELINE
     try:
@@ -70,14 +90,15 @@ def illustrate(data):
             source = Image.open(io.BytesIO(base64.b64decode(reference.split(",", 1)[1], validate=True)))
         elif reference == "mara.webp":
             source = Image.open(ROOT / "public" / reference)
+            source = source.crop((175, 85, 620, 530))
         else:
             source = Image.new("RGB", (224, 224))
-        PIPELINE.set_ip_adapter_scale(0.65 if reference else 0.0)
+        PIPELINE.set_ip_adapter_scale(0.45 if reference else 0.0)
         image = PIPELINE(
-            prompt=data["prompt"][:950],
+            prompt=scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2)),
             negative_prompt="multiple people, crowd, duplicate person, disembodied hands, text, watermark",
             ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
-            height=768, width=512, num_inference_steps=25,
+            height=768, width=512, num_inference_steps=30,
         ).images[0]
         output = io.BytesIO()
         image.save(output, "WEBP", quality=88)

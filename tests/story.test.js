@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { addTurn, attachImage, createCampaign, history, imageRequest, requestFor } from '../src/story.js'
 
 const result = (campaign, overrides = {}) => ({
-  prose: 'Mara watches the window.', choices: ['Wait'],
+  prose: 'You watch Mara turn to the window.', choices: ['Wait'],
   scene: campaign.turns[campaign.active].scene,
   facts: ['The player promised to return the brass key.'],
   summary: 'Mara revealed locker seventeen.',
@@ -15,7 +15,7 @@ test('turns carry recent context, durable facts and older summary', () => {
   for (let i = 1; i <= 30; i++) campaign = addTurn(campaign, String(i), 'Action ' + i, result(campaign))
   const context = JSON.parse(requestFor(campaign, 'Go back').messages[1].content)
   assert.equal(context.recent.length, 5)
-  assert.equal(context.recent[0].input, 'Action 26')
+  assert.equal(context.recent[0].playerAction, 'Action 26')
   assert.match(context.facts[0], /promised/)
   assert.match(context.summary, /locker seventeen/)
 })
@@ -25,9 +25,9 @@ test('art matches the focused character and their specific action', () => {
   const scene = { focus: 'mara', location: 'Ferry deck', action: 'Holds a lantern above her head', details: 'Wind and rain' }
   const art = imageRequest(campaign.world, scene)
   assert.equal(art.reference, 'mara.webp')
-  assert.match(art.prompt, /exactly one visible person/)
-  assert.match(art.prompt, /Holds a lantern above her head/)
-  assert.match(art.prompt, /Ferry deck/)
+  assert.equal(art.scene.action, scene.action)
+  assert.equal(art.scene.location, scene.location)
+  assert.equal(art.scene.appearance, campaign.world.characters[0].appearance)
   assert.equal(imageRequest(campaign.world, { ...scene, focus: '' }), null)
 })
 
@@ -49,6 +49,16 @@ test('unchanged scenes reuse art and late renders stay on their branch', () => {
 
 test('a malformed model response cannot replace the active turn', () => {
   const campaign = createCampaign()
-  assert.throws(() => addTurn(campaign, 'bad', 'Go', { prose: 'Incomplete' }), /incomplete/)
+  assert.throws(() => addTurn(campaign, 'bad', 'Go', { prose: 'You wait.' }), /incomplete/)
   assert.equal(campaign.active, 'opening')
+})
+
+test('an NPC point of view cannot replace a player turn', () => {
+  const campaign = createCampaign()
+  const request = requestFor(campaign, 'Check the key for fingerprints')
+  assert.match(request.messages[0].content, /player is the sole protagonist/)
+  assert.match(request.messages[0].content, /Never give the player’s action to an NPC/)
+  assert.throws(() => addTurn(campaign, 'bad', 'Check the key', result(campaign, {
+    prose: 'Mara checks the key for fingerprints.',
+  })), /lost the player’s point of view/)
 })

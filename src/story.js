@@ -55,12 +55,20 @@ export function requestFor(campaign, input) {
   return {
     format: resultSchema,
     messages: [
-      { role: 'system', content: 'You narrate interactive fiction in second person. Respond with the requested JSON only. Respect player agency and established facts. Narrate 2–4 paragraphs and offer up to three suggestions. Maintain a rolling summary and a list of durable facts, including inventory and promises. For scene.focus use the ID of the single character the player is interacting with, or an empty string if there is none. A bystander does not change focus unless they become the interaction partner. For scene.action describe only the focused character’s current visible physical action. For scene.details give their expression, visible props and lighting, without describing other people. Preserve the prior visible action if only dialogue changes. Any new character outside the given cast can appear in prose.' },
+      { role: 'system', content: [
+        'The player is the sole protagonist. Address the player as "you". Every named character in the cast is an NPC, including whoever is in the illustration.',
+        'The latest player action is performed or attempted by the player. Interpret an omitted subject, such as "check the key" or "leave", as "I". Begin prose with "You" or "Your" and immediately resolve that specific action or speech. If it is blocked, show what stops the player. Never give the player’s action to an NPC or invent a new decision for the player.',
+        'Example: "Check the key for fingerprints" → "You tilt the key toward the light. A faint print crosses its head. Mara watches from across the table."',
+        'After resolving the action, narrate NPC reactions and consequences. Offer up to three actions for the player. Keep established facts and a rolling summary. Older narration may have confused the roles. Always follow the player ownership rule.',
+        'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with the player. If the player leaves that NPC behind or is alone, use an empty string. Bystanders stay out of focus.',
+        'For scene.action, describe only what that NPC is visibly doing in this scene, in a short concrete phrase. For scene.details, use short visual cues for expression, props and lighting. Preserve the previous visible action when only dialogue changes. If focus is empty, use empty action and details.',
+        'Respond with the requested JSON only.',
+      ].join(' ') },
       { role: 'user', content: JSON.stringify({
         premise: campaign.world.premise,
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
         summary: current.summary, facts: current.facts, scene: current.scene,
-        recent: turns.slice(-5).map(({ input, prose }) => ({ input, prose })), action: input,
+        recent: turns.slice(-5).map(({ input, prose }) => ({ playerAction: input, prose })), action: input,
       }) },
     ],
   }
@@ -79,6 +87,9 @@ export function addTurn(campaign, id, input, result) {
   const previous = campaign.turns[campaign.active]
   const prose = checkedText(result.prose, 5000)
   if (!prose) throw new Error('The narrator returned an empty passage. Try again.')
+  if (!/^(you|your)\b/i.test(prose)) {
+    throw new Error('The narrator lost the player’s point of view. Try the action again.')
+  }
   const scene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   if (scene.focus && !campaign.world.characters.some(character => character.id === scene.focus)) {
     scene.focus = ''
@@ -101,7 +112,7 @@ export function imageRequest(world, scene) {
   if (!character) return null
   return {
     reference: character.reference,
-    prompt: `Cinematic illustrated fiction, medium shot, exactly one visible person alone in frame. ${scene.action} at ${scene.location}. ${character.appearance}. ${scene.details}. Frame the action and its props clearly.`,
+    scene: { action: scene.action, location: scene.location, details: scene.details, appearance: character.appearance },
   }
 }
 
