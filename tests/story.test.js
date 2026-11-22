@@ -86,3 +86,17 @@ test('a saved apartment turn recovers Mara, and an explicitly solo turn stays so
   }))
   assert.equal(imageRequest(solo.world, recoverCharacterIllustrations(solo).turns.solo.scene), null)
 })
+
+test('saved starter wardrobe does not compete with the current art direction', () => {
+  const campaign = createCampaign()
+  const world = { ...campaign.world, characters: [
+    { ...campaign.world.characters[0], appearance: 'Adult woman with olive skin, short dark bob, tan raincoat and burgundy sweater' },
+  ] }
+  const request = imageRequest(world, campaign.turns.opening.scene, {
+    action: 'Lifts a wet coat onto a wall hook',
+    location: 'Inside the apartment entryway',
+  })
+  assert.match(request.scene.action, /wall hook/)
+  assert.equal(request.scene.location, 'Inside the apartment entryway')
+  assert.doesNotMatch(request.scene.appearance, /raincoat/)
+})

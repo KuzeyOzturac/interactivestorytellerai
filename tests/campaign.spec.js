@@ -120,3 +120,22 @@ test('an echoed player entry is retried and only new narration is saved', async 
   await expect(page.getByText(entry, { exact: true })).toHaveCount(1)
   expect(attempts).toBe(2)
 })
+
+test('art direction can correct an illustration without rewriting the story', async ({ page }) => {
+  await page.route('**/api/image', async route => {
+    const { scene } = route.request().postDataJSON()
+    expect(scene.action).toContain('wall hook')
+    expect(scene.location).toBe('Inside the apartment entryway')
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await page.getByText('Adjust illustration').click()
+  await page.getByLabel('Visible action').fill('Reaches up to hang a wet coat on the wall hook')
+  await page.getByLabel('Setting', { exact: true }).fill('Inside the apartment entryway')
+  await page.getByRole('button', { name: 'Render with changes' }).click()
+  await expect(page.getByText('Slides a brass key across the diner table', { exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Render with changes' })).toBeEnabled()
+  await page.reload()
+  await page.getByText('Adjust illustration').click()
+  await expect(page.getByLabel('Visible action')).toHaveValue(/wall hook/)
+})

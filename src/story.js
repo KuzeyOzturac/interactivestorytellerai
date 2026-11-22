@@ -74,7 +74,7 @@ export function requestFor(campaign, input) {
         'Example: player entry "You take Mara to your apartment." Continue with "Mara hangs her wet coat by the door." The scene is the player’s apartment, Mara is present, and the player brought her there. Carry those facts forward.',
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
-        'For scene.action, describe only what that NPC is visibly doing in this scene, in a short concrete phrase. For scene.details, give short visual cues for expression, current clothing or dress state, props and lighting. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action and details.',
+        'For scene.action, describe the NPC in the middle of the visible action. Specify their pose, the object they handle and where it is. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." For scene.details, give short visual cues for expression, current clothing or dress state, props and lighting. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action and details.',
         'Respond with the requested JSON only.',
       ].join(' ') },
       { role: 'user', content: JSON.stringify({
@@ -113,7 +113,7 @@ export function addTurn(campaign, id, input, result) {
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
     summary: checkedText(result.summary, 2200), facts: checkedList(result.facts, 20),
-    image: scene.focus && sameScene(previous.scene, scene) ? previous.image : '',
+    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection ? previous.image : '',
   }
   return { ...campaign, active: id, turns: { ...campaign.turns, [id]: turn } }
 }
@@ -164,12 +164,22 @@ export function sameScene(a, b) {
   return ['focus', 'location', 'action', 'details'].every(key => normalize(a[key]) === normalize(b[key]))
 }
 
-export function imageRequest(world, scene) {
+export function imageRequest(world, scene, direction = {}) {
   const character = world.characters.find(entry => entry.id === scene.focus)
   if (!character) return null
+  const bundled = starter.characters.find(person => person.id === character.id)
+  const defaultAppearance = [
+    'Adult woman with olive skin, short dark bob, tan raincoat and burgundy sweater',
+    'Adult man with a salt-and-pepper beard, cropped hair, dark wool coat and gray cap',
+  ]
+  const appearance = bundled?.name === character.name && defaultAppearance.includes(character.appearance)
+    ? bundled.appearance : character.appearance
   return {
     reference: character.reference,
-    scene: { action: scene.action, location: scene.location, details: scene.details, appearance: character.appearance },
+    scene: {
+      action: direction.action || scene.action, location: direction.location || scene.location,
+      details: direction.details ?? scene.details, appearance,
+    },
   }
 }
 

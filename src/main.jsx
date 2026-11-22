@@ -110,7 +110,7 @@ function App() {
   async function renderArt(snapshot) {
     const id = snapshot.active
     const selected = snapshot.turns[id]
-    const request = imageRequest(snapshot.world, selected.scene)
+    const request = imageRequest(snapshot.world, selected.scene, selected.artDirection)
     if (!request || activeRenders.current.has(id)) return
     if (!request.reference) {
       request.reference = history(snapshot).find(entry => entry.scene.focus === selected.scene.focus && entry.image)?.image || ''
@@ -136,6 +136,16 @@ function App() {
         setRendering([...activeRenders.current.keys()])
       }
     }
+  }
+  function reviseArt(event) {
+    event.preventDefault()
+    const fields = new FormData(event.currentTarget)
+    const artDirection = Object.fromEntries(['action', 'location', 'details'].map(field => [field, fields.get(field).trim()]))
+    const base = current.current
+    const selected = base.turns[base.active]
+    const next = { ...base, turns: { ...base.turns, [selected.id]: { ...selected, artDirection } } }
+    update(next)
+    void renderArt(next)
   }
   async function play(action, base = current.current) {
     action = action.trim()
@@ -240,6 +250,15 @@ function App() {
           <button onClick={() => renderArt(current.current)} disabled={rendering.includes(turn.id) || !loaded}><ArrowCounterClockwise size={17}/> {turn.image ? 'Regenerate art' : 'Generate art'}</button>
           <label><input type="checkbox" checked={autoArt} onChange={event => { setAutoArt(event.target.checked); localStorage.setItem('nightdraft-auto-art', event.target.checked ? 'on' : 'off') }}/> Auto-illustrate</label>
         </div>}
+        {character && loaded && <details key={turn.id} className="art-direction">
+          <summary>Adjust illustration</summary>
+          <form className="editor" onSubmit={reviseArt}>
+            <label>Visible action<input name="action" defaultValue={turn.artDirection?.action || turn.scene.action} required maxLength="250"/></label>
+            <label>Setting<input name="location" defaultValue={turn.artDirection?.location || turn.scene.location} required maxLength="150"/></label>
+            <label>Visual details<input name="details" defaultValue={turn.artDirection?.details ?? turn.scene.details} maxLength="250"/></label>
+            <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
+          </form>
+        </details>}
         {rendering.includes(turn.id) && <p role="status">Drawing the character locally…</p>}
         {character && visual && !turn.image && <p className="muted">Showing previously saved character art.</p>}
         {artError && <p role="alert" className="error">{artError}</p>}

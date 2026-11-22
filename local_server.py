@@ -39,9 +39,9 @@ def narrate(data):
 
 def scene_prompt(scene, tokenizers):
     # Leave room for separators and special tokens in both SDXL encoders.
-    prefix = "Solo character, medium-wide shot"
+    prefix = "Solo character"
     pieces = [prefix]
-    for field, budget in (("action", 20), ("location", 12), ("details", 10), ("appearance", 17)):
+    for field, budget in (("action", 26), ("location", 14), ("details", 12), ("appearance", 12)):
         words = scene[field].split()
         while words and not all(
             len(tokenizer(" ".join(words), add_special_tokens=False, verbose=False).input_ids) <= budget
@@ -51,7 +51,7 @@ def scene_prompt(scene, tokenizers):
             words.pop()
         if words:
             pieces.append(" ".join(words).rstrip(",."))
-    style = ", ".join([*pieces, "cinematic painterly illustration"])
+    style = ", ".join([*pieces, "medium-wide action shot, painterly illustration"])
     if all(len(tokenizer(style, verbose=False).input_ids) <= tokenizer.model_max_length for tokenizer in tokenizers):
         return style
     return ", ".join(pieces)
@@ -93,12 +93,19 @@ def illustrate(data):
             source = source.crop((175, 85, 620, 530))
         else:
             source = Image.new("RGB", (224, 224))
-        PIPELINE.set_ip_adapter_scale(0.45 if reference else 0.0)
+        PIPELINE.set_ip_adapter_scale(0.12 if reference else 0.0)
+
+        def add_likeness_after_layout(pipe, step, _timestep, callback_kwargs):
+            if step == 11:
+                pipe.set_ip_adapter_scale(0.35)
+            return callback_kwargs
+
         image = PIPELINE(
             prompt=scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2)),
             negative_prompt="multiple people, crowd, duplicate person, disembodied hands, text, watermark",
             ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
             height=768, width=512, num_inference_steps=30,
+            callback_on_step_end=add_likeness_after_layout if reference else None,
         ).images[0]
         output = io.BytesIO()
         image.save(output, "WEBP", quality=88)
