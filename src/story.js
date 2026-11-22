@@ -164,7 +164,7 @@ export function recoverCharacterIllustrations(campaign) {
 
 export function sameScene(a, b) {
   const normalize = (value = '') => value.trim().toLowerCase().replace(/[.!?]+$/, '')
-  return ['focus', 'location', 'action', 'wardrobe', 'details'].every(key => normalize(a[key]) === normalize(b[key]))
+  return ['focus', 'location', 'action', 'wardrobe'].every(key => normalize(a[key]) === normalize(b[key]))
 }
 
 export function imageRequest(world, scene, direction = {}) {
@@ -179,10 +179,11 @@ export function imageRequest(world, scene, direction = {}) {
     ? bundled.appearance : character.appearance
   return {
     reference: character.reference,
+    exactPrompt: direction.exactPrompt || '',
     scene: {
       action: direction.action || scene.action, location: direction.location || scene.location,
       wardrobe: direction.wardrobe ?? scene.wardrobe ?? '',
-      details: direction.details ?? scene.details, appearance,
+      appearance,
     },
   }
 }

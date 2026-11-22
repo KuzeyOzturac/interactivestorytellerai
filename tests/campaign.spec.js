@@ -141,3 +141,18 @@ test('art direction can correct an illustration without rewriting the story', as
   await page.getByText('Adjust illustration').click()
   await expect(page.getByLabel('Visible action')).toHaveValue(/wall hook/)
 })
+
+test('an exact image prompt is sent without narration details', async ({ page }) => {
+  await page.route('**/api/image', async route => {
+    const request = route.request().postDataJSON()
+    expect(request.exactPrompt).toBe('portrait')
+    expect(request.scene).not.toHaveProperty('details')
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await page.getByText('Adjust illustration').click()
+  await page.getByLabel('Exact image prompt').fill('portrait')
+  const response = page.waitForResponse('**/api/image')
+  await page.getByRole('button', { name: 'Render with changes' }).click()
+  expect((await response).ok()).toBe(true)
+})

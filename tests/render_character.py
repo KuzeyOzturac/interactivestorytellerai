@@ -26,17 +26,22 @@ def main():
     parser.add_argument("case", choices=CASES)
     parser.add_argument("output", type=Path)
     parser.add_argument("--seed", type=int, default=31)
+    parser.add_argument("--prompt", default="")
     args = parser.parse_args()
     scene = {**CASES[args.case], "appearance": "Adult woman with olive skin and a short dark bob"}
-    body = json.dumps({"scene": scene, "reference": "mara.webp", "seed": args.seed}).encode()
+    body = json.dumps({"scene": scene, "reference": "mara.webp", "seed": args.seed, "exactPrompt": args.prompt}).encode()
     request = Request("http://127.0.0.1:8787/api/image", body, {"Content-Type": "application/json"})
     with urlopen(request, timeout=900) as response:
         image = json.load(response)["image"].removeprefix("data:image/webp;base64,")
     with args.output.open("xb") as output:
         output.write(base64.b64decode(image, validate=True))
-    print(f"Saved {args.output} with seed {args.seed}. Inspect the image against these criteria:")
-    for field in ("action", "location", "wardrobe", "details"):
-        print(f"  {scene[field]}")
+    print(f"Saved {args.output} with seed {args.seed}.")
+    if args.prompt:
+        print(f"Exact image prompt: {args.prompt}")
+    else:
+        print("Inspect the image against these criteria:")
+        for field in ("action", "location", "wardrobe"):
+            print(f"  {scene[field]}")
 
 
 if __name__ == "__main__":

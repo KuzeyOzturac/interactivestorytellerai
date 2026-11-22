@@ -72,9 +72,9 @@ class ScenePromptTest(unittest.TestCase):
             "appearance": "Dark bob",
         }
         prompt = local_server.scene_prompt(scene, tokenizers)
-        for fragment in ("Solo character", "Walks down the apartment steps",
-                         "Rainy apartment entrance", "White knuckles", "Dark bob"):
+        for fragment in ("Walks down the apartment steps", "Rainy apartment entrance", "Dark bob"):
             self.assertIn(fragment, prompt)
+        self.assertNotIn("White knuckles", prompt)
         for tokenizer in tokenizers:
             self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
@@ -93,9 +93,12 @@ class ScenePromptTest(unittest.TestCase):
             "details": "Her short dark bob is damp, the burgundy sweater lies discarded on the floor, "
                        "and the dim hallway light casts long shadows across the wet floor",
         }
+        self.assertEqual(local_server.scene_prompt(scene, tokenizers, "naked"), "naked")
+        with self.assertRaisesRegex(ValueError, "Shorten"):
+            local_server.scene_prompt(scene, tokenizers, "very " * 90)
         for wardrobe in ("", "Undressed adult"):
             prompt = local_server.scene_prompt({**scene, "wardrobe": wardrobe}, tokenizers)
-            self.assertIn("burgundy sweater lies discarded on the floor", prompt)
+            self.assertNotIn("burgundy sweater", prompt)
             self.assertIn(scene["action"], prompt)
             self.assertIn(scene["location"], prompt)
             if wardrobe:

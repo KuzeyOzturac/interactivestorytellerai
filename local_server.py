@@ -37,12 +37,17 @@ def narrate(data):
         raise RuntimeError("The local model returned an incomplete turn. Try again.") from error
 
 
-def scene_prompt(scene, tokenizers):
-    pieces = ["Solo character"]
+def scene_prompt(scene, tokenizers, exact_prompt=""):
+    pieces = []
 
     def fits(candidate):
         return all(len(tokenizer(candidate, verbose=False).input_ids) <= tokenizer.model_max_length
                    for tokenizer in tokenizers)
+
+    if exact_prompt:
+        if not fits(exact_prompt):
+            raise ValueError("Shorten the exact image prompt to fit SDXL’s token limit.")
+        return exact_prompt
 
     def add(phrase):
         phrase = phrase.strip(" ,.")
@@ -56,17 +61,7 @@ def scene_prompt(scene, tokenizers):
     for field in ("action", "location"):
         add(scene.get(field, ""))
 
-    # Keep relationships intact, for example the prop and where it is.
-    # A fragment ending at the prop can reverse the meaning of a clause.
-    details = scene.get("details", "")
-    if fits(", ".join([*pieces, details])):
-        add(details)
-    else:
-        for clause in details.replace(";", ",").split(","):
-            add(clause)
-
     add(scene.get("appearance", ""))
-    add("medium-wide action shot, painterly illustration")
     return ", ".join(pieces)
 
 
@@ -113,7 +108,7 @@ def illustrate(data):
                 pipe.set_ip_adapter_scale(0.35)
             return callback_kwargs
 
-        prompt = scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2))
+        prompt = scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2), data.get("exactPrompt", ""))
         if os.environ.get("NIGHTDRAFT_LOG_ART_PROMPT") == "1":
             print(f"Art prompt: {prompt}", flush=True)
         seed = data.get("seed")
@@ -122,7 +117,7 @@ def illustrate(data):
         image = PIPELINE(
             prompt=prompt,
             generator=torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None,
-            negative_prompt="multiple people, crowd, duplicate person, disembodied hands, text, watermark",
+            negative_prompt="multiple people, duplicate person, collage, comic strip, split screen, disembodied hands, text, watermark",
             ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
             height=768, width=512, num_inference_steps=30,
             callback_on_step_end=add_likeness_after_layout if reference else None,
