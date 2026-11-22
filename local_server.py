@@ -49,7 +49,11 @@ def scene_prompt(scene, tokenizers):
         if phrase and fits(", ".join([*pieces, phrase])):
             pieces.append(phrase)
 
-    for field in ("wardrobe", "action", "location"):
+    wardrobe = scene.get("wardrobe", "")
+    if wardrobe.strip().lower().rstrip(".") in {"undressed adult", "unclothed adult"}:
+        wardrobe = "Naked adult"
+    add(wardrobe)
+    for field in ("action", "location"):
         add(scene.get(field, ""))
 
     # Keep relationships intact, for example the prop and where it is.
@@ -112,8 +116,12 @@ def illustrate(data):
         prompt = scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2))
         if os.environ.get("NIGHTDRAFT_LOG_ART_PROMPT") == "1":
             print(f"Art prompt: {prompt}", flush=True)
+        seed = data.get("seed")
+        if seed is not None and (type(seed) is not int or not 0 <= seed < 2**32):
+            raise ValueError("Image seed must be an integer from 0 to 4294967295.")
         image = PIPELINE(
             prompt=prompt,
+            generator=torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None,
             negative_prompt="multiple people, crowd, duplicate person, disembodied hands, text, watermark",
             ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
             height=768, width=512, num_inference_steps=30,
