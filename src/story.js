@@ -74,7 +74,7 @@ export function requestFor(campaign, input) {
         'Example: player entry "You take Mara to your apartment." Continue with "Mara hangs her wet coat by the door." The scene is the player’s apartment, Mara is present, and the player brought her there. Carry those facts forward.',
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
-        'For scene.action, describe the NPC in the middle of the visible action. Specify their pose and gaze, and the size and placement of any object they handle. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked adult" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
+        'For scene.action, write one short visible action for the NPC, such as "Sits on the floor". Choose the main pose or gesture and omit secondary actions, gaze and incidental props. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
         'Respond with the requested JSON only. Put only in-world story prose in the prose field. Omit analysis, references to the player’s entry or prior continuation, planning, and commentary about how you interpreted the scene.',
       ].join(' ') },
       { role: 'user', content: JSON.stringify({
@@ -122,7 +122,8 @@ export function addTurn(campaign, id, input, result) {
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
     summary: checkedText(result.summary, 2200), facts: checkedList(result.facts, 20),
-    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection ? previous.image : '',
+    imageStyle: previous.imageStyle,
+    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artStyle || '') ? previous.image : '',
   }
   return { ...campaign, active: id, turns: { ...campaign.turns, [id]: turn } }
 }
@@ -187,14 +188,14 @@ export function imageRequest(world, scene, direction = {}) {
     reference: character.reference,
     exactPrompt: direction.exactPrompt || '',
     scene: {
-      action: direction.action || scene.action, location: direction.location || scene.location,
+      action: direction.action || scene.action.split(',')[0].trim(), location: direction.location || scene.location,
       wardrobe: direction.wardrobe ?? scene.wardrobe ?? '',
-      appearance,
+      appearance, style: world.artStyle || '',
     },
   }
 }
 
-export function attachImage(campaign, id, image) {
+export function attachImage(campaign, id, image, style = '') {
   if (!Object.hasOwn(campaign.turns, id)) return campaign
-  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image } } }
+  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style } } }
 }

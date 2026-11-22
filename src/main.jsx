@@ -127,7 +127,7 @@ function App() {
       if (!response.ok || !data?.image?.startsWith('data:image/webp;base64,')) {
         throw new Error(data?.error || 'Scene art is unavailable. Start the local server and check the image setup.')
       }
-      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image))
+      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image, request.scene.style))
     } catch (failure) {
       if (!controller.signal.aborted && current.current.active === id) setArtError(failure.message)
     } finally {
@@ -277,6 +277,18 @@ function App() {
             turns: { ...current.current.turns, [turn.id]: { ...current.current.turns[turn.id], summary: event.target.value.slice(0, 2200) } } })}/></label>
           <label>Remembered facts <small>One per line</small><textarea key={turn.id + '-facts'} rows="5" defaultValue={turn.facts.join('\n')} onBlur={event => update({ ...current.current,
             turns: { ...current.current.turns, [turn.id]: { ...current.current.turns[turn.id], facts: event.target.value.split('\n').map(fact => fact.trim().slice(0, 300)).filter(Boolean).slice(0, 20) } } })}/></label>
+          <form className="editor" onSubmit={event => {
+            event.preventDefault()
+            const artStyle = new FormData(event.currentTarget).get('artStyle').trim()
+            const base = current.current
+            update({ ...base, world: { ...base.world, artStyle } })
+            setPanel('')
+          }}>
+            <label>Art style <small>Used for automatic illustrations in this world. Leave blank for no style prompt.</small>
+              <input name="artStyle" defaultValue={campaign.world.artStyle || ''} placeholder="e.g. muted watercolor" maxLength="70"/>
+            </label>
+            <button>Save art style</button>
+          </form>
           <h3>Character references</h3>
           {campaign.world.characters.length === 0 && <p>No characters in this world yet.</p>}
           {campaign.world.characters.map(entry => <label key={entry.id}>{entry.name}

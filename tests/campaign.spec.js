@@ -175,3 +175,19 @@ test('narrator commentary is retried and excluded from the transcript', async ({
   await expect(page.getByText(commentary, { exact: true })).toHaveCount(0)
   expect(attempts).toBe(2)
 })
+
+test('world art style persists and is sent to the illustration renderer', async ({ page }) => {
+  await page.route('**/api/image', async route => {
+    expect(route.request().postDataJSON().scene.style).toBe('muted watercolor')
+    await route.fulfill({ json: { image } })
+  })
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Journal' }).click()
+  await page.getByRole('textbox', { name: 'Art style' }).fill('muted watercolor')
+  await page.getByRole('button', { name: 'Save art style' }).click()
+  await expect(page.getByRole('dialog')).not.toBeVisible()
+  await page.reload()
+  const response = page.waitForResponse('**/api/image')
+  await page.getByRole('button', { name: 'Regenerate art' }).click()
+  expect((await response).ok()).toBe(true)
+})

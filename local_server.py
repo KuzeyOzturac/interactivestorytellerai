@@ -55,12 +55,13 @@ def scene_prompt(scene, tokenizers, exact_prompt=""):
             pieces.append(phrase)
 
     wardrobe = scene.get("wardrobe", "")
-    if wardrobe.strip().lower().rstrip(".") in {"undressed adult", "unclothed adult"}:
-        wardrobe = "Naked adult"
+    if wardrobe.strip().lower().rstrip(".") in {"undressed adult", "unclothed adult", "naked adult"}:
+        wardrobe = "Naked"
     add(wardrobe)
     for field in ("action", "location"):
         add(scene.get(field, ""))
 
+    add(scene.get("style", ""))
     add(scene.get("appearance", ""))
     return ", ".join(pieces)
 

@@ -100,3 +100,12 @@ test('saved starter wardrobe does not compete with the current art direction', (
   assert.equal(request.scene.location, 'Inside the apartment entryway')
   assert.doesNotMatch(request.scene.appearance, /raincoat/)
 })
+
+test('automatic art uses a short action and the same style across a world', () => {
+  const { world } = createCampaign()
+  const styled = { ...world, artStyle: 'muted watercolor' }
+  const scene = { focus: 'mara', action: 'Sits on the floor, looking at the key', location: 'Apartment' }
+  assert.equal(imageRequest(styled, scene).scene.action, 'Sits on the floor')
+  assert.equal(imageRequest(styled, scene).scene.style, 'muted watercolor')
+  assert.equal(imageRequest(styled, { ...scene, focus: 'theo' }).scene.style, 'muted watercolor')
+})

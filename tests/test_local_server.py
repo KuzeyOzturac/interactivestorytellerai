@@ -102,7 +102,8 @@ class ScenePromptTest(unittest.TestCase):
             self.assertIn(scene["action"], prompt)
             self.assertIn(scene["location"], prompt)
             if wardrobe:
-                self.assertIn("Naked adult", prompt)
+                self.assertIn("Naked,", prompt)
+                self.assertNotIn("Naked adult", prompt)
             for tokenizer in tokenizers:
                 self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
