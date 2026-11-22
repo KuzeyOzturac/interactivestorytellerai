@@ -63,7 +63,7 @@ test('playing ahead keeps an earlier scene render attached to its own turn', asy
   const firstReady = new Promise(resolve => { releaseFirst = resolve })
   await page.route('**/api/turn', route => {
     const input = JSON.parse(route.request().postDataJSON().messages[1].content)
-    return route.fulfill({ json: input.action === 'Board the ferry' ? generated : {
+    return route.fulfill({ json: input.playerEntry === 'Board the ferry' ? generated : {
       ...generated, prose: 'You step closer. Theo sets the lantern on a crate.',
       scene: { ...generated.scene, action: 'Sets the lantern on a crate' },
     } })

@@ -15,7 +15,7 @@ test('turns carry recent context, durable facts and older summary', () => {
   for (let i = 1; i <= 30; i++) campaign = addTurn(campaign, String(i), 'Action ' + i, result(campaign))
   const context = JSON.parse(requestFor(campaign, 'Go back').messages[1].content)
   assert.equal(context.recent.length, 5)
-  assert.equal(context.recent[0].playerAction, 'Action 26')
+  assert.equal(context.recent[0].playerEntry, 'Action 26')
   assert.match(context.facts[0], /promised/)
   assert.match(context.summary, /locker seventeen/)
 })
@@ -53,12 +53,19 @@ test('a malformed model response cannot replace the active turn', () => {
   assert.equal(campaign.active, 'opening')
 })
 
-test('an NPC point of view cannot replace a player turn', () => {
+test('the exact player narration and resulting scene carry into the next turn', () => {
   const campaign = createCampaign()
-  const request = requestFor(campaign, 'Check the key for fingerprints')
-  assert.match(request.messages[0].content, /player is the sole protagonist/)
-  assert.match(request.messages[0].content, /Never give the player’s action to an NPC/)
-  assert.throws(() => addTurn(campaign, 'bad', 'Check the key', result(campaign, {
-    prose: 'Mara checks the key for fingerprints.',
-  })), /lost the player’s point of view/)
+  const entry = 'You take Mara to your apartment.'
+  const next = addTurn(campaign, 'apartment', entry, result(campaign, {
+    prose: 'Mara hangs her wet coat by the door.',
+    scene: { focus: 'mara', location: 'Your apartment', action: 'Hangs her wet coat', details: '' },
+    facts: ['You brought Mara to your apartment.'],
+  }))
+  const request = requestFor(next, 'You offer Mara a towel.')
+  const context = JSON.parse(request.messages[1].content)
+  assert.equal(context.playerEntry, 'You offer Mara a towel.')
+  assert.deepEqual(context.recent.at(-1), { playerEntry: entry, continuation: 'Mara hangs her wet coat by the door.' })
+  assert.equal(context.scene.location, 'Your apartment')
+  assert.equal(context.scene.focus, 'mara')
+  assert.match(request.messages[0].content, /Continue immediately after it/)
 })
