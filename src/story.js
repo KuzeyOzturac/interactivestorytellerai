@@ -34,6 +34,15 @@ export function history(campaign, end = campaign.active) {
   return turns.reverse()
 }
 
+export const cameraAngles = {
+  '': 'Automatic',
+  'eye-level': 'Eye level',
+  low: 'Looking up',
+  high: 'Looking down',
+  close: 'Close-up',
+  side: 'Side view',
+}
+
 export const resultSchema = {
   type: 'object',
   required: ['prose', 'choices', 'scene', 'facts', 'summary'],
@@ -41,8 +50,11 @@ export const resultSchema = {
     prose: { type: 'string' },
     choices: { type: 'array', maxItems: 3, items: { type: 'string' } },
     scene: {
-      type: 'object', required: ['location', 'focus', 'action', 'wardrobe', 'details'],
-      properties: Object.fromEntries(['location', 'focus', 'action', 'wardrobe', 'details'].map(key => [key, { type: 'string' }])),
+      type: 'object', required: ['location', 'focus', 'action', 'wardrobe', 'details', 'viewpoint'],
+      properties: {
+        ...Object.fromEntries(['location', 'focus', 'action', 'wardrobe', 'details'].map(key => [key, { type: 'string' }])),
+        viewpoint: { type: 'string', enum: Object.keys(cameraAngles) },
+      },
     },
     facts: { type: 'array', maxItems: 20, items: { type: 'string' } },
     summary: { type: 'string' },
@@ -75,6 +87,7 @@ export function requestFor(campaign, input) {
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
         'For scene.action, write one short visible action for the NPC, such as "Sits on the floor". Choose the main pose or gesture and omit secondary actions, gaze and incidental props. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
+        'For scene.viewpoint, use the player’s physical view of the NPC: low for looking up, high for looking down, close for moving very near, side for seeing the NPC in profile, eye-level for a normal front view. Retain the previous viewpoint if the player has not moved or changed how they look at the NPC. Use an empty string if there is no meaningful angle or the player is alone. Keep the player out of frame.',
         'Respond with the requested JSON only. Put only in-world story prose in the prose field. Omit analysis, references to the player’s entry or prior continuation, planning, and commentary about how you interpreted the scene.',
       ].join(' ') },
       { role: 'user', content: JSON.stringify({
@@ -117,6 +130,8 @@ export function addTurn(campaign, id, input, result) {
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
   if (scene.focus && scene.focus !== 'none') {
+    const viewpoint = result.scene.viewpoint ?? (scene.focus === previous.scene.focus ? previous.scene.viewpoint : '')
+    scene.viewpoint = Object.hasOwn(cameraAngles, viewpoint) ? viewpoint : ''
     scene.wardrobe = checkedText(result.scene.wardrobe ?? (scene.focus === previous.scene.focus ? previous.scene.wardrobe : '') ?? '', 150)
   }
   const turn = {
@@ -171,7 +186,7 @@ export function recoverCharacterIllustrations(campaign) {
 
 export function sameScene(a, b) {
   const normalize = (value = '') => value.trim().toLowerCase().replace(/[.!?]+$/, '')
-  return ['focus', 'location', 'action', 'wardrobe'].every(key => normalize(a[key]) === normalize(b[key]))
+  return ['focus', 'location', 'action', 'wardrobe', 'viewpoint'].every(key => normalize(a[key]) === normalize(b[key]))
 }
 
 export function imageRequest(world, scene, direction = {}) {
@@ -191,6 +206,7 @@ export function imageRequest(world, scene, direction = {}) {
       action: direction.action || scene.action.split(',')[0].trim(), location: direction.location || scene.location,
       wardrobe: direction.wardrobe ?? scene.wardrobe ?? '',
       appearance, style: world.artStyle || '',
+      viewpoint: direction.viewpoint || scene.viewpoint || '',
     },
   }
 }

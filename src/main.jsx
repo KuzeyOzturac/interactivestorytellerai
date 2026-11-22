@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
+import { addTurn, attachImage, cameraAngles, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
 import { readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
@@ -140,7 +140,7 @@ function App() {
   function reviseArt(event) {
     event.preventDefault()
     const fields = new FormData(event.currentTarget)
-    const artDirection = Object.fromEntries(['action', 'location', 'wardrobe', 'exactPrompt'].map(field => [field, fields.get(field).trim()]))
+    const artDirection = Object.fromEntries(['action', 'location', 'wardrobe', 'viewpoint', 'exactPrompt'].map(field => [field, fields.get(field).trim()]))
     const base = current.current
     const selected = base.turns[base.active]
     const next = { ...base, turns: { ...base.turns, [selected.id]: { ...selected, artDirection } } }
@@ -256,6 +256,9 @@ function App() {
             <label>Visible action<input name="action" defaultValue={turn.artDirection?.action || turn.scene.action} required maxLength="250"/></label>
             <label>Setting<input name="location" defaultValue={turn.artDirection?.location || turn.scene.location} required maxLength="150"/></label>
             <label>Current wardrobe<input name="wardrobe" defaultValue={turn.artDirection?.wardrobe ?? turn.scene.wardrobe ?? ''} maxLength="150"/></label>
+            <label>Camera angle<select name="viewpoint" defaultValue={turn.artDirection?.viewpoint || ''}>
+              {Object.entries(cameraAngles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+            </select></label>
             <label>Exact image prompt <small>Optional. Replaces the automatic prompt when filled in.</small><textarea name="exactPrompt" defaultValue={turn.artDirection?.exactPrompt ?? ''} maxLength="300" rows="2"/></label>
             <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
           </form>

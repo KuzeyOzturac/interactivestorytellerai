@@ -89,6 +89,7 @@ class ScenePromptTest(unittest.TestCase):
         scene = {
             "action": "Looks down holding a brass key",
             "location": "Inside the apartment hallway",
+            "viewpoint": "low",
             "appearance": "Adult woman with olive skin and a short dark bob",
             "details": "Her short dark bob is damp, the burgundy sweater lies discarded on the floor, "
                        "and the dim hallway light casts long shadows across the wet floor",
@@ -101,6 +102,7 @@ class ScenePromptTest(unittest.TestCase):
             self.assertNotIn("burgundy sweater", prompt)
             self.assertIn(scene["action"], prompt)
             self.assertIn(scene["location"], prompt)
+            self.assertIn("low-angle view", prompt)
             if wardrobe:
                 self.assertIn("Naked,", prompt)
                 self.assertNotIn("Naked adult", prompt)

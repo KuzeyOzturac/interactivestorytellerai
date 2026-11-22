@@ -61,6 +61,13 @@ def scene_prompt(scene, tokenizers, exact_prompt=""):
     for field in ("action", "location"):
         add(scene.get(field, ""))
 
+    add({
+        "low": "low-angle view",
+        "high": "high-angle view",
+        "eye-level": "eye-level view",
+        "close": "close-up view",
+        "side": "profile view",
+    }.get(scene.get("viewpoint"), ""))
     add(scene.get("style", ""))
     add(scene.get("appearance", ""))
     return ", ".join(pieces)

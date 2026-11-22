@@ -109,3 +109,14 @@ test('automatic art uses a short action and the same style across a world', () =
   assert.equal(imageRequest(styled, scene).scene.style, 'muted watercolor')
   assert.equal(imageRequest(styled, { ...scene, focus: 'theo' }).scene.style, 'muted watercolor')
 })
+
+test('a change in player viewpoint triggers fresh art for the same character and action', () => {
+  const start = createCampaign()
+  const fromFloor = addTurn(start, 'floor', 'You sit on the floor and look up at Mara.', result(start, {
+    scene: { ...start.turns.opening.scene, viewpoint: 'low' },
+  }))
+  const turn = fromFloor.turns.floor
+  assert.equal(turn.image, '')
+  assert.equal(imageRequest(start.world, turn.scene).scene.viewpoint, 'low')
+  assert.equal(imageRequest(start.world, turn.scene, { viewpoint: 'high' }).scene.viewpoint, 'high')
+})
