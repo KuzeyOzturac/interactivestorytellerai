@@ -41,8 +41,8 @@ export const resultSchema = {
     prose: { type: 'string' },
     choices: { type: 'array', maxItems: 3, items: { type: 'string' } },
     scene: {
-      type: 'object', required: ['location', 'focus', 'action', 'details'],
-      properties: Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, { type: 'string' }])),
+      type: 'object', required: ['location', 'focus', 'action', 'wardrobe', 'details'],
+      properties: Object.fromEntries(['location', 'focus', 'action', 'wardrobe', 'details'].map(key => [key, { type: 'string' }])),
     },
     facts: { type: 'array', maxItems: 20, items: { type: 'string' } },
     summary: { type: 'string' },
@@ -74,7 +74,7 @@ export function requestFor(campaign, input) {
         'Example: player entry "You take Mara to your apartment." Continue with "Mara hangs her wet coat by the door." The scene is the player’s apartment, Mara is present, and the player brought her there. Carry those facts forward.',
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
-        'For scene.action, describe the NPC in the middle of the visible action. Specify their pose, the object they handle and where it is. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." For scene.details, give short visual cues for expression, current clothing or dress state, props and lighting. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action and details.',
+        'For scene.action, describe the NPC in the middle of the visible action. Specify their pose, the object they handle and where it is. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
         'Respond with the requested JSON only.',
       ].join(' ') },
       { role: 'user', content: JSON.stringify({
@@ -110,6 +110,9 @@ export function addTurn(campaign, id, input, result) {
   if (!prose) throw new Error('The narrator returned an empty passage. Try again.')
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
+  if (scene.focus && scene.focus !== 'none') {
+    scene.wardrobe = checkedText(result.scene.wardrobe ?? (scene.focus === previous.scene.focus ? previous.scene.wardrobe : '') ?? '', 150)
+  }
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
     summary: checkedText(result.summary, 2200), facts: checkedList(result.facts, 20),
@@ -160,8 +163,8 @@ export function recoverCharacterIllustrations(campaign) {
 }
 
 export function sameScene(a, b) {
-  const normalize = value => value.trim().toLowerCase().replace(/[.!?]+$/, '')
-  return ['focus', 'location', 'action', 'details'].every(key => normalize(a[key]) === normalize(b[key]))
+  const normalize = (value = '') => value.trim().toLowerCase().replace(/[.!?]+$/, '')
+  return ['focus', 'location', 'action', 'wardrobe', 'details'].every(key => normalize(a[key]) === normalize(b[key]))
 }
 
 export function imageRequest(world, scene, direction = {}) {
@@ -178,6 +181,7 @@ export function imageRequest(world, scene, direction = {}) {
     reference: character.reference,
     scene: {
       action: direction.action || scene.action, location: direction.location || scene.location,
+      wardrobe: direction.wardrobe ?? scene.wardrobe ?? '',
       details: direction.details ?? scene.details, appearance,
     },
   }

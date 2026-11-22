@@ -40,3 +40,14 @@ npm run test:browser
 ```
 
 GitHub Actions runs these checks on pushes and pull requests. Playwright uses deterministic model responses and exercises the UI, save and reload, rollback, mobile layout, and world creation. To verify live inference, start the local server, submit an action that changes the character's visible pose, then confirm the resulting text and art agree. Rewind and check that the prior image returns.
+
+### Check live illustration accuracy
+
+With the local image server running, run an acceptance case from a second terminal. Each command calls the real renderer and writes an image you can open and compare with the printed criteria.
+
+```sh
+python tests/render_character.py coat-hook coat-hook.webp
+python tests/render_character.py brass-key brass-key.webp
+```
+
+Use fresh output filenames for repeated samples. An HTTP success only confirms a render completed. Check the visible action, location, clothing, props, and character likeness in the image. To see the exact text passed to SDXL, start the local server with `NIGHTDRAFT_LOG_ART_PROMPT=1`. This prints private scene descriptions to your terminal, so leave it off for ordinary play.

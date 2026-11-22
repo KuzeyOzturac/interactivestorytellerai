@@ -1,4 +1,5 @@
 import json
+import os
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -65,10 +66,10 @@ class ScenePromptTest(unittest.TestCase):
 
         tokenizers = (Tokenizer(1), Tokenizer(2))
         scene = {
-            "action": "Walks down the apartment steps " + "extra " * 50,
+            "action": "Walks down the apartment steps",
             "location": "Rainy apartment entrance",
-            "details": "White knuckles on a brass key " + "extra " * 50,
-            "appearance": "Dark bob, tan raincoat " + "extra " * 50,
+            "details": "White knuckles on a brass key, " + "extra " * 50,
+            "appearance": "Dark bob",
         }
         prompt = local_server.scene_prompt(scene, tokenizers)
         for fragment in ("Solo character", "Walks down the apartment steps",
@@ -76,6 +77,31 @@ class ScenePromptTest(unittest.TestCase):
             self.assertIn(fragment, prompt)
         for tokenizer in tokenizers:
             self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
+
+
+    @unittest.skipUnless(os.environ.get("NIGHTDRAFT_REAL_TOKENIZERS"), "requires SDXL tokenizer files")
+    def test_reported_apartment_prompt_with_real_sdxl_tokenizers(self):
+        from transformers import CLIPTokenizer
+
+        root = os.environ["NIGHTDRAFT_REAL_TOKENIZERS"]
+        tokenizers = tuple(CLIPTokenizer.from_pretrained(os.path.join(root, name))
+                           for name in ("tokenizer", "tokenizer_2"))
+        scene = {
+            "action": "Looks down holding a brass key",
+            "location": "Inside the apartment hallway",
+            "appearance": "Adult woman with olive skin and a short dark bob",
+            "details": "Her short dark bob is damp, the burgundy sweater lies discarded on the floor, "
+                       "and the dim hallway light casts long shadows across the wet floor",
+        }
+        for wardrobe in ("", "Undressed adult"):
+            prompt = local_server.scene_prompt({**scene, "wardrobe": wardrobe}, tokenizers)
+            self.assertIn("burgundy sweater lies discarded on the floor", prompt)
+            self.assertIn(scene["action"], prompt)
+            self.assertIn(scene["location"], prompt)
+            if wardrobe:
+                self.assertIn(wardrobe, prompt)
+            for tokenizer in tokenizers:
+                self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
 
 if __name__ == "__main__":

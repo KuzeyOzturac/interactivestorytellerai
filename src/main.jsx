@@ -140,7 +140,7 @@ function App() {
   function reviseArt(event) {
     event.preventDefault()
     const fields = new FormData(event.currentTarget)
-    const artDirection = Object.fromEntries(['action', 'location', 'details'].map(field => [field, fields.get(field).trim()]))
+    const artDirection = Object.fromEntries(['action', 'location', 'wardrobe', 'details'].map(field => [field, fields.get(field).trim()]))
     const base = current.current
     const selected = base.turns[base.active]
     const next = { ...base, turns: { ...base.turns, [selected.id]: { ...selected, artDirection } } }
@@ -255,7 +255,8 @@ function App() {
           <form className="editor" onSubmit={reviseArt}>
             <label>Visible action<input name="action" defaultValue={turn.artDirection?.action || turn.scene.action} required maxLength="250"/></label>
             <label>Setting<input name="location" defaultValue={turn.artDirection?.location || turn.scene.location} required maxLength="150"/></label>
-            <label>Visual details<input name="details" defaultValue={turn.artDirection?.details ?? turn.scene.details} maxLength="250"/></label>
+            <label>Current wardrobe<input name="wardrobe" defaultValue={turn.artDirection?.wardrobe ?? turn.scene.wardrobe ?? ''} maxLength="150"/></label>
+            <label>Visual details<textarea name="details" defaultValue={turn.artDirection?.details ?? turn.scene.details} maxLength="250" rows="3"/></label>
             <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
           </form>
         </details>}

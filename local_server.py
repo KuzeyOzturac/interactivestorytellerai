@@ -38,22 +38,31 @@ def narrate(data):
 
 
 def scene_prompt(scene, tokenizers):
-    # Leave room for separators and special tokens in both SDXL encoders.
-    prefix = "Solo character"
-    pieces = [prefix]
-    for field, budget in (("action", 26), ("location", 14), ("details", 12), ("appearance", 12)):
-        words = scene[field].split()
-        while words and not all(
-            len(tokenizer(" ".join(words), add_special_tokens=False, verbose=False).input_ids) <= budget
-            and len(tokenizer(", ".join([*pieces, " ".join(words)]), verbose=False).input_ids) <= tokenizer.model_max_length
-            for tokenizer in tokenizers
-        ):
-            words.pop()
-        if words:
-            pieces.append(" ".join(words).rstrip(",."))
-    style = ", ".join([*pieces, "medium-wide action shot, painterly illustration"])
-    if all(len(tokenizer(style, verbose=False).input_ids) <= tokenizer.model_max_length for tokenizer in tokenizers):
-        return style
+    pieces = ["Solo character"]
+
+    def fits(candidate):
+        return all(len(tokenizer(candidate, verbose=False).input_ids) <= tokenizer.model_max_length
+                   for tokenizer in tokenizers)
+
+    def add(phrase):
+        phrase = phrase.strip(" ,.")
+        if phrase and fits(", ".join([*pieces, phrase])):
+            pieces.append(phrase)
+
+    for field in ("wardrobe", "action", "location"):
+        add(scene.get(field, ""))
+
+    # Keep relationships intact, for example the prop and where it is.
+    # A fragment ending at the prop can reverse the meaning of a clause.
+    details = scene.get("details", "")
+    if fits(", ".join([*pieces, details])):
+        add(details)
+    else:
+        for clause in details.replace(";", ",").split(","):
+            add(clause)
+
+    add(scene.get("appearance", ""))
+    add("medium-wide action shot, painterly illustration")
     return ", ".join(pieces)
 
 
@@ -100,8 +109,11 @@ def illustrate(data):
                 pipe.set_ip_adapter_scale(0.35)
             return callback_kwargs
 
+        prompt = scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2))
+        if os.environ.get("NIGHTDRAFT_LOG_ART_PROMPT") == "1":
+            print(f"Art prompt: {prompt}", flush=True)
         image = PIPELINE(
-            prompt=scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2)),
+            prompt=prompt,
             negative_prompt="multiple people, crowd, duplicate person, disembodied hands, text, watermark",
             ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
             height=768, width=512, num_inference_steps=30,
