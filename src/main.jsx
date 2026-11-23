@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, cameraAngles, contradictsDestination, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
+import { addTurn, attachImage, cameraAngles, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
 import { listCampaigns, readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
@@ -203,7 +203,7 @@ function App() {
     try {
       const request = requestFor(base, action)
       let result = await callModel('turn', request)
-      if (repeatsPlayerEntry(action, result.prose) || isNarratorCommentary(result.prose) || contradictsDestination(action, result.scene)) {
+      if (repeatsPlayerEntry(action, result.prose) || isNarratorCommentary(result.prose)) {
         const [instructions, ...context] = request.messages
         result = await callModel('turn', { ...request, messages: [
           { ...instructions, content: instructions.content + ' Retry the turn. Start where the latest entry leaves the player. Write the next event directly as fiction, with no echo or commentary.' },

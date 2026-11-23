@@ -98,7 +98,7 @@ test('the apartment beat displays the reviewed image, with no render request', a
   await page.goto('/')
   await page.getByLabel('Your move').fill('You take Mara to your apartment.')
   await page.getByRole('button', { name: 'Continue' }).click()
-  const illustration = page.getByRole('img', { name: /Mara Venn.*hangs/ })
+  const illustration = page.getByRole('img', { name: /Mara Venn.*hangs/i })
   await expect(illustration).toHaveAttribute('src', /mara-coat-hook\.webp$/)
   await expect.poll(() => illustration.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
   expect(renders).toBe(0)

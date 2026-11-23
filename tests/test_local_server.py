@@ -1,3 +1,4 @@
+import io
 import json
 import os
 import threading
@@ -143,6 +144,54 @@ class ScenePromptTest(unittest.TestCase):
 
 
 class ModelReviewTest(unittest.TestCase):
+    def test_incomplete_model_json_retries_with_stricter_format(self):
+        def response(content):
+            return io.BytesIO(json.dumps({"message": {"content": content}}).encode())
+
+        with patch.object(local_server, "urlopen", side_effect=[
+            response('{"prose": "unfinished'),
+            response('```json\n{"prose": "Mara looks around the apartment."}\n```'),
+        ]) as send:
+            result = local_server.ollama_json("qwen3:4b", [{"role": "user", "content": "Continue."}],
+                                             {"required": ["prose"]}, {"temperature": 0.75})
+        self.assertEqual(result["prose"], "Mara looks around the apartment.")
+        self.assertEqual(send.call_count, 2)
+        self.assertEqual(json.loads(send.call_args.args[0].data)["options"]["temperature"], 0.2)
+
+    def test_arrival_anchors_scene_before_story_review(self):
+        context = {"playerEntry": "You take Mara to your apartment.", "playerDestination": "Your apartment",
+                   "playerCompanion": "mara", "scene": {"wardrobe": "Red sweater"}}
+        source = {"prose": "Mara glances at the doorway.", "scene": {"location": "The Breakwater Diner",
+                  "focus": "none", "action": "Sits at the booth", "details": "Two coffee cups"}}
+        with patch.object(local_server, "ollama_json", return_value=source), \
+             patch.object(local_server, "STORY_REVIEW", True), \
+             patch.object(local_server, "review_story", return_value=(True, "")) as reviewer:
+            result = local_server.narrate({"messages": [{"content": json.dumps(context)}], "format": {}})
+        scene = reviewer.call_args.args[1]["scene"]
+        self.assertEqual(scene["location"], "Your apartment")
+        self.assertEqual(scene["focus"], "mara")
+        self.assertEqual(scene["action"], "")
+        self.assertEqual(result["scene"]["wardrobe"], "Red sweater")
+
+    def test_arrival_recovers_when_model_cannot_produce_a_valid_turn(self):
+        context = {"playerEntry": "You take Mara to your apartment.", "playerDestination": "Your apartment",
+                   "playerCompanion": "mara", "cast": [{"id": "mara", "name": "Mara Venn"}],
+                   "scene": {"location": "Your apartment", "focus": "mara", "action": ""},
+                   "facts": ["The brass key opens locker seventeen."]}
+        messages = [{"role": "system", "content": "Narrate."},
+                    {"role": "user", "content": json.dumps(context)}]
+        draft = {"prose": "Mara stays at the diner.", "scene": context["scene"].copy()}
+        verdict = {"passes": False, "reason": "Wrong setting."}
+        with patch.object(local_server, "STORY_REVIEW", True):
+            for replies in ([local_server.IncompleteModelOutput("Truncated.")], [draft, verdict, draft, verdict]):
+                with patch.object(local_server, "ollama_json", side_effect=replies):
+                    result = local_server.narrate({"messages": messages, "format": {}})
+                self.assertEqual(result["prose"], "Mara Venn pauses to take in the room.")
+                self.assertEqual(result["scene"]["location"], "Your apartment")
+                self.assertEqual(result["scene"]["focus"], "mara")
+                self.assertEqual(result["facts"], context["facts"])
+                self.assertEqual(result["stateChanges"], [])
+
     def test_story_retries_with_the_review_reason(self):
         messages = [{"role": "system", "content": "Narrate."},
                     {"role": "user", "content": json.dumps({"playerEntry": "You take the key."})}]

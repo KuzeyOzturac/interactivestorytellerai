@@ -181,7 +181,11 @@ test('an established move to the apartment cannot be saved as an unrelated locat
   const input = JSON.parse(requestFor(start, entry).messages[1].content)
   assert.equal(input.playerDestination, 'Your apartment')
   assert.deepEqual(input.playerVisibleAction, { focus: 'mara', action: 'Hangs her coat' })
-  assert.throws(() => addTurn(start, 'wrong-place', entry, result(start)), /lost track/)
+  assert.equal(input.scene.location, 'Your apartment')
+  assert.equal(input.playerCompanion, 'mara')
+  const fixed = addTurn(start, 'wrong-place', entry, result(start))
+  assert.equal(fixed.turns['wrong-place'].scene.location, 'Your apartment')
+  assert.equal(fixed.turns['wrong-place'].scene.focus, 'mara')
   assert.doesNotThrow(() => addTurn(start, 'right-place', entry, result(start, {
     scene: { ...start.turns.opening.scene, location: "Player's apartment hallway" },
   })))

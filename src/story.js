@@ -89,15 +89,13 @@ function declaredViewpoint(entry) {
   return match ? (match[1].toLowerCase() === 'up' ? 'low' : 'high') : ''
 }
 
-function declaredDestination(entry) {
-  const move = /^(?:you |i )?(?:go|walk|head|return|take [\w -]+?|bring [\w -]+?) (?:back )?to (?:your|my) (apartment|home|house|room)\b/i.exec(entry.trim())
-  return move?.[1].toLowerCase() || ''
-}
-
-export function contradictsDestination(entry, scene) {
-  const destination = declaredDestination(entry)
-  if (!destination || typeof scene?.location !== 'string') return false
-  return !scene.location.toLowerCase().includes(destination)
+function declaredMove(entry, characters, previousFocus) {
+  const move = /^(?:you |i )?(?:go|walk|head|return|(?:take|bring) ([\p{L}\p{N} -]+?)) (?:back )?to (?:your|my) (apartment|home|house|room)\b/iu.exec(entry.trim())
+  if (!move) return null
+  const companion = move[1]?.trim().toLowerCase()
+  const matches = characters.filter(character => characterNames(character, characters).includes(companion))
+  const focus = ['her', 'him', 'them'].includes(companion) ? previousFocus : matches.length === 1 ? matches[0].id : ''
+  return { place: move[2].toLowerCase(), focus }
 }
 
 const nonVisualVerbs = new Set(['is', 'was', 'has', 'does', 'seems', 'wants', 'thinks', 'knows', 'remembers',
@@ -127,7 +125,11 @@ export function requestFor(campaign, input) {
   const current = turns.at(-1)
   const state = current.state ?? {}
   const playerStateChanges = declaredCustody(state, input, campaign.world.characters)
-  const destination = declaredDestination(input)
+  const move = declaredMove(input, campaign.world.characters, current.scene.focus)
+  const scene = move ? {
+    ...current.scene, location: 'Your ' + move.place, focus: move.focus,
+    action: '', details: '', viewpoint: '', wardrobe: move.focus === current.scene.focus ? current.scene.wardrobe : '',
+  } : current.scene
   return {
     format: {
       ...resultSchema,
@@ -154,10 +156,11 @@ export function requestFor(campaign, input) {
       { role: 'user', content: JSON.stringify({
         premise: campaign.world.premise,
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
-        summary: current.summary, facts: current.facts, currentState: { ...state, ...playerStateChanges }, playerStateChanges, scene: current.scene,
-        recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
+        summary: current.summary, facts: current.facts, currentState: { ...state, ...playerStateChanges }, playerStateChanges, scene,
+        recent: (move ? [] : turns.slice(-5)).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
         relevantMemories: recallMemories(turns, input),
-        playerDestination: destination ? 'Your ' + destination : '',
+        playerDestination: move ? scene.location : '',
+        playerCompanion: move?.focus || '',
         playerVisibleAction: declaredVisibleAction(input, campaign.world.characters),
         playerEntry: input,
       }) },
@@ -234,8 +237,12 @@ export function addTurn(campaign, id, input, result) {
   const prose = checkedText(result.prose, 5000)
   if (!prose) throw new Error('The narrator returned an empty passage. Try again.')
   if (isNarratorCommentary(prose)) throw new Error('The narrator returned commentary instead of story prose. Try the turn again.')
-  if (contradictsDestination(input, result.scene)) throw new Error('The narrator lost track of where you went. Try the turn again.')
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
+  const move = declaredMove(input, campaign.world.characters, previous.scene.focus)
+  if (move && !rawScene.location.toLowerCase().split(/[^\p{L}]+/u).includes(move.place)) {
+    Object.assign(rawScene, { location: 'Your ' + move.place, action: '', details: '' })
+  }
+  if (move?.focus) rawScene.focus = move.focus
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
   const declared = declaredVisibleAction(input, campaign.world.characters)
   const illustrated = declared?.focus === scene.focus ? declared :

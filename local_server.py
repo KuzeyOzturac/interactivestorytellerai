@@ -37,30 +37,43 @@ STORY_REVIEW = os.environ.get("NIGHTDRAFT_STORY_REVIEW", "1") != "0"
 VERIFIED_ART_LOCK = threading.Lock()
 
 
+class IncompleteModelOutput(RuntimeError):
+    pass
+
+
 def ollama_json(model, messages, schema, options):
-    body = json.dumps({
-        "model": model, "stream": False, "think": False, "keep_alive": 0,
-        "format": schema, "messages": messages, "options": options,
-    }).encode()
-    request = Request(f"{OLLAMA}/api/chat", body, {"Content-Type": "application/json"})
-    try:
-        with urlopen(request, timeout=300) as response:
-            result = json.load(response)
-        decoded = json.loads(result["message"]["content"])
-        if not isinstance(decoded, dict):
-            raise ValueError("expected a JSON object")
-        return decoded
-    except HTTPError as error:
-        raise RuntimeError(f"Ollama could not use {model}. Check that the model is installed.") from error
-    except (URLError, TimeoutError) as error:
-        raise RuntimeError("Ollama did not respond. Check that it is running and try again.") from error
-    except (KeyError, TypeError, ValueError) as error:
-        raise RuntimeError(f"{model} returned incomplete structured output. Try again.") from error
+    for attempt in range(2):
+        chat_messages = messages if not attempt else [
+            *messages,
+            {"role": "user", "content": "Return exactly one complete JSON object matching the requested schema. Keep all text fields concise."},
+        ]
+        body = json.dumps({
+            "model": model, "stream": False, "think": False, "keep_alive": 0,
+            "format": schema, "messages": chat_messages,
+            "options": options if not attempt else {**options, "temperature": 0.2},
+        }).encode()
+        request = Request(f"{OLLAMA}/api/chat", body, {"Content-Type": "application/json"})
+        try:
+            with urlopen(request, timeout=300) as response:
+                result = json.load(response)
+            content = result["message"]["content"].strip()
+            fenced = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", content, flags=re.I | re.S)
+            decoded = json.loads(fenced[1] if fenced else content)
+            if not isinstance(decoded, dict) or any(key not in decoded for key in schema.get("required", [])):
+                raise ValueError("expected a complete JSON object")
+            return decoded
+        except HTTPError as error:
+            raise RuntimeError(f"Ollama could not use {model}. Check that the model is installed.") from error
+        except (URLError, TimeoutError, ConnectionError) as error:
+            raise RuntimeError("Ollama did not respond. Check that it is running and try again.") from error
+        except (AttributeError, KeyError, TypeError, ValueError) as error:
+            if attempt:
+                raise IncompleteModelOutput(f"{model} returned incomplete structured output after a retry. Your entry is still available.") from error
 
 
 def check_verdict(result):
     if type(result.get("passes")) is not bool or not isinstance(result.get("reason"), str):
-        raise RuntimeError("The local reviewer returned an incomplete verdict. Try again.")
+        raise IncompleteModelOutput("The local reviewer returned an incomplete verdict. Try again.")
     return result["passes"], result["reason"].strip()[:240]
 
 
@@ -71,7 +84,7 @@ def review_story(context, turn):
         "current_state": context.get("currentState"),
         "latest_player_state_changes": context.get("playerStateChanges"),
         "cast": {person.get("id"): person.get("name") for person in context.get("cast", []) if isinstance(person, dict)},
-        "previous_scene": context.get("scene"),
+        "scene_at_start_of_continuation": context.get("scene"),
         "proposed_prose": turn.get("prose"),
         "proposed_scene": turn.get("scene"),
         "proposed_state_changes": turn.get("stateChanges"),
@@ -86,6 +99,20 @@ def review_story(context, turn):
         )},
         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
     ], REVIEW_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 180}))
+
+
+def anchor_destination(context, turn):
+    scene = turn.get("scene")
+    destination = context.get("playerDestination")
+    if isinstance(destination, str) and destination and isinstance(scene, dict):
+        place = destination.removeprefix("Your ").casefold()
+        location = scene.get("location")
+        if not isinstance(location, str) or not re.search(r"\b" + re.escape(place) + r"\b", location.casefold()):
+            scene.update(location=destination, action="", details="", viewpoint="")
+        companion = context.get("playerCompanion")
+        if companion and scene.get("focus") != companion:
+            scene.update(focus=companion, action="", details="", wardrobe=context.get("scene", {}).get("wardrobe", ""))
+    return turn
 
 
 def narrate(data):
@@ -103,16 +130,29 @@ def narrate(data):
         context = {}
     context = context if isinstance(context, dict) else {}
     options = {"num_ctx": 8192, "num_predict": 2300, **sampling}
-    turn = ollama_json(MODEL, messages, data["format"], options)
-    if STORY_REVIEW and context.get("playerEntry") and isinstance(turn.get("prose"), str):
-        passes, reason = review_story(context, turn)
-        if not passes:
-            correction = "Rewrite the entire turn from the latest player entry. Continuity issue: " + reason
-            retry = [{**messages[0], "content": messages[0]["content"] + "\n" + correction}, *messages[1:]]
-            turn = ollama_json(MODEL, retry, data["format"], {**options, "temperature": 0.35})
+    try:
+        turn = anchor_destination(context, ollama_json(MODEL, messages, data["format"], options))
+        if STORY_REVIEW and context.get("playerEntry") and isinstance(turn.get("prose"), str):
             passes, reason = review_story(context, turn)
             if not passes:
-                raise RuntimeError("The narrator's retry still conflicted with the story. " + reason)
+                correction = "Rewrite the entire turn from the latest player entry. Continuity issue: " + reason
+                retry = [{**messages[0], "content": messages[0]["content"] + "\n" + correction}, *messages[1:]]
+                turn = anchor_destination(context, ollama_json(MODEL, retry, data["format"], {**options, "temperature": 0.35}))
+                passes, reason = review_story(context, turn)
+                if not passes:
+                    raise IncompleteModelOutput("The narrator's retry still conflicted with the story. " + reason)
+    except IncompleteModelOutput:
+        if not context.get("playerDestination") or not isinstance(context.get("scene"), dict):
+            raise
+        companion_id = context.get("playerCompanion")
+        companion = next((person.get("name") for person in context.get("cast", [])
+                          if isinstance(person, dict) and companion_id and person.get("id") == companion_id), None)
+        turn = {
+            "prose": f"{companion} pauses to take in the room." if companion else "The room is quiet for a moment.",
+            "choices": [], "scene": context["scene"].copy(),
+            "facts": context.get("facts", []), "summary": context.get("summary", ""),
+            "stateChanges": [], "supersededFacts": [],
+        }
     scene = turn.get("scene")
     previous = context.get("scene", {})
     if isinstance(scene, dict) and isinstance(previous, dict) and isinstance(scene.get("action"), str):
