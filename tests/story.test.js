@@ -158,11 +158,15 @@ test('a declared tracked-item transfer is authoritative even if the model disagr
   const context = JSON.parse(requestFor(start, entry).messages[1].content)
   assert.equal(context.currentState['item.brass-key.holder'], 'Player')
   const next = addTurn(start, 'take', entry, result(start, {
-    stateChanges: [{ key: 'item.brass-key.holder', value: 'Mara' }],
-    scene: { ...start.turns.opening.scene, action: 'Holds the brass key in her palm' },
+    stateChanges: [
+      { key: 'item.brass-key.holder', value: 'Mara' },
+      { key: 'item.brass-key.location', value: 'On the table' },
+    ],
+    scene: { ...start.turns.opening.scene, action: 'Slides a brass key across the table' },
   }))
   assert.equal(next.turns.take.scene.action, '')
   assert.equal(next.turns.take.state['item.brass-key.holder'], 'Player')
+  assert.equal(next.turns.take.state['item.brass-key.location'], undefined)
   const later = addTurn(next, 'later', 'You look up at Mara.', result(next, {
     scene: { ...start.turns.opening.scene, action: 'Holds the brass key in her palm' },
   }))

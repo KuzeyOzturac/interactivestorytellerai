@@ -243,11 +243,12 @@ export function addTurn(campaign, id, input, result) {
   if (illustrated?.focus === scene.focus) scene.action = illustrated.action
   const custody = declaredCustody(previous.state ?? {}, input, campaign.world.characters)
   const state = { ...updateState(previous.state, result.stateChanges), ...custody }
+  for (const key of Object.keys(custody)) delete state[key.replace(/\.holder$/, '.location')]
   for (const [key, holder] of Object.entries(state)) {
     const item = /^item\.([a-z0-9-]+)\.holder$/.exec(key)?.[1]
     if (!item || typeof holder !== 'string' || holder.toLowerCase() !== 'player') continue
     const lastWord = item.split('-').at(-1)
-    if (/^(holds?|grips?|clutches?|pockets?|carries|catches|takes?|tightens)\b/i.test(scene.action) &&
+    if (/^(holds?|grips?|clutches?|pockets?|carries|catches|takes?|tightens|slides?|offers?|handles?)\b/i.test(scene.action) &&
         scene.action.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(lastWord)) {
       scene.action = ''
     }
@@ -272,6 +273,7 @@ export function addTurn(campaign, id, input, result) {
     imageStyle: previous.imageStyle,
     image: reviewed || (reusable ? previous.image : ''),
     imageSource: reviewed ? 'reviewed' : reusable ? previous.imageSource : undefined,
+    imageReviewed: reusable ? previous.imageReviewed : undefined,
   }
   return { ...campaign, active: id, turns: { ...campaign.turns, [id]: turn } }
 }
@@ -354,7 +356,7 @@ export function imageRequest(world, scene, direction = {}) {
   }
 }
 
-export function attachImage(campaign, id, image, style = '') {
+export function attachImage(campaign, id, image, style = '', reviewed = false) {
   if (!Object.hasOwn(campaign.turns, id)) return campaign
-  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style, imageSource: 'generated' } } }
+  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style, imageSource: 'generated', imageReviewed: reviewed } } }
 }

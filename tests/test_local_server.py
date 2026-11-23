@@ -142,5 +142,52 @@ class ScenePromptTest(unittest.TestCase):
                 self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
 
+class ModelReviewTest(unittest.TestCase):
+    def test_story_retries_with_the_review_reason(self):
+        messages = [{"role": "system", "content": "Narrate."},
+                    {"role": "user", "content": json.dumps({"playerEntry": "You take the key."})}]
+        wrong = {"prose": "Mara still holds the key."}
+        right = {"prose": "The key is cold in your palm."}
+        with patch.object(local_server, "STORY_REVIEW", True), \
+             patch.object(local_server, "ollama_json", side_effect=[
+                 wrong, {"passes": False, "reason": "The player already has the key."},
+                 right, {"passes": True, "reason": ""},
+             ]) as chat:
+            self.assertEqual(local_server.narrate({"messages": messages, "format": {}}), right)
+        self.assertIn("The player already has the key", chat.call_args_list[2].args[1][0]["content"])
+        self.assertEqual(messages[0]["content"], "Narrate.")
+
+    def test_failed_story_review_does_not_return_a_turn(self):
+        messages = [{"role": "user", "content": json.dumps({"playerEntry": "You take the key."})}]
+        draft = {"prose": "Mara still holds the key."}
+        verdict = {"passes": False, "reason": "Wrong holder."}
+        with patch.object(local_server, "STORY_REVIEW", True), \
+             patch.object(local_server, "ollama_json", side_effect=[draft, verdict, draft, verdict]):
+            with self.assertRaisesRegex(RuntimeError, "Wrong holder"):
+                local_server.narrate({"messages": messages, "format": {}})
+
+    def test_image_review_retries_and_keeps_only_the_accepted_render(self):
+        with patch.object(local_server, "VISION_MODEL", "vision"), \
+             patch.object(local_server, "illustrate", side_effect=[{"image": "plant"}, {"image": "person"}]) as render, \
+             patch.object(local_server, "release_image_pipeline"), \
+             patch.object(local_server, "review_image", side_effect=[(False, "No person."), (True, "")]):
+            result = local_server.render_checked_image({"seed": 11})
+        self.assertEqual(result, {"image": "person", "reviewed": True})
+        self.assertEqual([call.args[0]["seed"] for call in render.call_args_list], [11, 12])
+
+    def test_two_rejected_images_do_not_return_an_image(self):
+        with patch.object(local_server, "VISION_MODEL", "vision"), \
+             patch.object(local_server, "illustrate", return_value={"image": "plant"}), \
+             patch.object(local_server, "release_image_pipeline"), \
+             patch.object(local_server, "review_image", return_value=(False, "No person.")):
+            with self.assertRaisesRegex(RuntimeError, "No person"):
+                local_server.render_checked_image({})
+
+    def test_unconfigured_vision_returns_an_unreviewed_render(self):
+        with patch.object(local_server, "VISION_MODEL", ""), \
+             patch.object(local_server, "illustrate", return_value={"image": "person"}):
+            self.assertEqual(local_server.render_checked_image({}), {"image": "person", "reviewed": False})
+
+
 if __name__ == "__main__":
     unittest.main()

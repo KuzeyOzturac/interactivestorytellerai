@@ -66,3 +66,16 @@ python tests/render_character.py looking-up angle-31.webp --seed 31
 ```
 
 The image test also accepts `--style`, `--style-reference`, `--depth-guide`, `--prompt`, and `--unweighted-negatives` for comparison. Use the same seed and input while changing one option, then repeat with other seeds. Set `NIGHTDRAFT_BENCH_SEED` to compare narrator profiles at another seed.
+
+### Review model output
+
+Nightdraft checks each story draft against the player entry and current state using a second local Ollama call. If the reviewer identifies a continuity error, Nightdraft retries once and only saves a result that passes. This can make turns take longer. Set `NIGHTDRAFT_STORY_REVIEW=0` for an unreviewed baseline comparison.
+
+To check dynamic illustrations, install a local vision model and restart the server with the reviewer enabled:
+
+```sh
+ollama pull gemma3:4b
+NIGHTDRAFT_VISION_MODEL=gemma3:4b HF_HUB_DISABLE_IMPLICIT_TOKEN=1 python local_server.py
+```
+
+Image review checks the visible character, action, and essential props. When the first image misses, the app tries one more sample. If both miss, the turn keeps its prior illustration or reference and shows the reason. The vision model shares memory with SDXL, so Nightdraft releases SDXL between a render and review. This makes reviewed renders slower. A model verdict is an approximation and can itself be wrong. Leave the vision setting unset to keep using unreviewed local renders.

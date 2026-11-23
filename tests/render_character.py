@@ -59,7 +59,7 @@ def main():
         "weightedNegatives": not args.unweighted_negatives,
     }).encode()
     request = Request("http://127.0.0.1:8787/api/image", body, {"Content-Type": "application/json"})
-    with urlopen(request, timeout=900) as response:
+    with urlopen(request, timeout=1_220) as response:
         image = json.load(response)["image"].removeprefix("data:image/webp;base64,")
     with args.output.open("xb") as output:
         output.write(base64.b64decode(image, validate=True))

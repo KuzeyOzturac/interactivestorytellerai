@@ -14,7 +14,7 @@ for (const sampling of ['baseline', 'qwen', 'steady']) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ...requestFor(createCampaign(), entry), sampling, seed }),
-      signal: AbortSignal.timeout(305_000),
+      signal: AbortSignal.timeout(1_220_000),
     })
     const turn = await response.json()
     const pass = response.ok && typeof turn.prose === 'string' && Boolean(turn.prose.trim()) &&

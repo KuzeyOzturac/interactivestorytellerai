@@ -137,7 +137,7 @@ function App() {
     const request = imageRequest(snapshot.world, selected.scene, selected.artDirection)
     if (!request || activeRenders.current.has(id)) return
     if (!request.reference && !selected.artDirection?.disableFace) {
-      request.reference = history(snapshot).find(entry => entry.scene.focus === selected.scene.focus && entry.image)?.image || ''
+      request.reference = history(snapshot).find(entry => entry.scene.focus === selected.scene.focus && entry.image && entry.imageReviewed === true)?.image || ''
     }
     const controller = new AbortController()
     activeRenders.current.set(id, controller)
@@ -151,7 +151,7 @@ function App() {
       if (!response.ok || !data?.image?.startsWith('data:image/webp;base64,')) {
         throw new Error(data?.error || 'Scene art is unavailable. Start the local server and check the image setup.')
       }
-      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image, snapshot.world.artRevision || request.scene.style))
+      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image, snapshot.world.artRevision || request.scene.style, data.reviewed === true))
     } catch (failure) {
       if (!controller.signal.aborted && current.current.active === id) setArtError(failure.message)
     } finally {
@@ -313,6 +313,7 @@ function App() {
             <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
           </form>
         </details>}
+        {turn.imageSource === 'generated' && <p className="muted">{turn.imageReviewed ? 'Passed local scene review' : 'Unreviewed render'}</p>}
         {rendering.includes(turn.id) && <p role="status">Drawing the character locally…</p>}
         {character && visual && !turn.image && <p className="muted">Showing previously saved character art.</p>}
         {artError && <p role="alert" className="error">{artError}</p>}
