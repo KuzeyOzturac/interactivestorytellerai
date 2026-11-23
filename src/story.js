@@ -18,7 +18,7 @@ export function createCampaign(world = starter) {
       id: 'opening', parent: null, input: '', prose: world.opening,
       choices: world === starter ? openingChoices : [],
       scene: { location: world.location, focus: world.focus, action: world.action, details: '' },
-      facts: [], summary: '', image: world === starter ? 'mara.webp' : '',
+      facts: [], state: {}, summary: '', image: world === starter ? 'mara.webp' : '',
     } },
   }
 }
@@ -45,7 +45,7 @@ export const cameraAngles = {
 
 export const resultSchema = {
   type: 'object',
-  required: ['prose', 'choices', 'scene', 'facts', 'summary'],
+  required: ['prose', 'choices', 'scene', 'facts', 'summary', 'stateChanges', 'supersededFacts'],
   properties: {
     prose: { type: 'string' },
     choices: { type: 'array', maxItems: 3, items: { type: 'string' } },
@@ -58,6 +58,13 @@ export const resultSchema = {
     },
     facts: { type: 'array', maxItems: 20, items: { type: 'string' } },
     summary: { type: 'string' },
+    stateChanges: {
+      type: 'array', maxItems: 20,
+      items: { type: 'object', required: ['key', 'value'], properties: {
+        key: { type: 'string' }, value: { type: 'string' },
+      } },
+    },
+    supersededFacts: { type: 'array', maxItems: 20, items: { type: 'string' } },
   },
 }
 
@@ -85,6 +92,9 @@ export function requestFor(campaign, input) {
         'Treat events the player states as having happened as established story facts, including actions, dialogue, who is present and changes of location. If the player explicitly writes an attempt or question, continue from the attempt or question. Never choose a new action for the player.',
         'Example: player entry "You take Mara to your apartment." Continue with "Mara hangs her wet coat by the door." The scene is the player’s apartment, Mara is present, and the player brought her there. Carry those facts forward.',
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
+        'Current state is authoritative over earlier passages and summaries. The newest established player entry can change current state immediately. Use stateChanges for changed, mutable facts such as who holds an object, whether a door is locked, or where someone is. Reuse the same key for the same property, for example item.brass-key.holder. An empty value clears an obsolete property. Leave unchanged properties out.',
+        'Example: current state says item.brass-key.holder = Mara. The player writes "You take the brass key from Mara." Set item.brass-key.holder = Player and continue with Player holding it. If facts contains "Mara has the brass key", include that exact fact in supersededFacts and remove it from facts. Keep historical events in the summary explicitly in the past. Mere attempts, doubts, and dialogue claims do not change state by themselves.',
+        'Use facts for durable context. Omit mutable facts already captured in currentState or stateChanges. Write supersededFacts as exact copies of outdated facts from the supplied facts list.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
         'For scene.action, write one short visible action for the NPC, such as "Sits on the floor". Choose the main pose or gesture and omit secondary actions, gaze and incidental props. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
         'For scene.viewpoint, use the player’s physical view of the NPC: low for looking up, high for looking down, close for moving very near, side for seeing the NPC in profile, eye-level for a normal front view. Retain the previous viewpoint if the player has not moved or changed how they look at the NPC. Use an empty string if there is no meaningful angle or the player is alone. Keep the player out of frame.',
@@ -93,7 +103,7 @@ export function requestFor(campaign, input) {
       { role: 'user', content: JSON.stringify({
         premise: campaign.world.premise,
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
-        summary: current.summary, facts: current.facts, scene: current.scene,
+        summary: current.summary, facts: current.facts, currentState: current.state ?? {}, scene: current.scene,
         recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
         playerEntry: input,
       }) },
@@ -122,6 +132,18 @@ function checkedList(value, count) {
   return value.slice(0, count).map(item => checkedText(item, 300)).filter(Boolean)
 }
 
+function updateState(previous, changes) {
+  const state = new Map(Object.entries(previous ?? {}))
+  for (const change of (changes ?? []).slice(0, 20)) {
+    const key = checkedText(change.key, 100).toLowerCase()
+    if (!/^[a-z0-9-]+(?:\.[a-z0-9-]+)+$/.test(key)) continue
+    const value = checkedText(change.value, 200)
+    if (value) state.set(key, value)
+    else state.delete(key)
+  }
+  return Object.fromEntries(state)
+}
+
 export function addTurn(campaign, id, input, result) {
   const previous = campaign.turns[campaign.active]
   const prose = checkedText(result.prose, 5000)
@@ -134,9 +156,13 @@ export function addTurn(campaign, id, input, result) {
     scene.viewpoint = Object.hasOwn(cameraAngles, viewpoint) ? viewpoint : ''
     scene.wardrobe = checkedText(result.scene.wardrobe ?? (scene.focus === previous.scene.focus ? previous.scene.wardrobe : '') ?? '', 150)
   }
+  const normalizeFact = fact => fact.toLowerCase().replace(/[.!?]+$/, '')
+  const superseded = new Set(checkedList(result.supersededFacts ?? [], 20).map(normalizeFact))
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
-    summary: checkedText(result.summary, 2200), facts: checkedList(result.facts, 20),
+    summary: checkedText(result.summary, 2200),
+    facts: checkedList(result.facts, 20).filter(fact => !superseded.has(normalizeFact(fact))),
+    state: updateState(previous.state, result.stateChanges),
     imageStyle: previous.imageStyle,
     image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artStyle || '') ? previous.image : '',
   }

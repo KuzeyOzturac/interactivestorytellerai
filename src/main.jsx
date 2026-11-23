@@ -280,6 +280,12 @@ function App() {
             turns: { ...current.current.turns, [turn.id]: { ...current.current.turns[turn.id], summary: event.target.value.slice(0, 2200) } } })}/></label>
           <label>Remembered facts <small>One per line</small><textarea key={turn.id + '-facts'} rows="5" defaultValue={turn.facts.join('\n')} onBlur={event => update({ ...current.current,
             turns: { ...current.current.turns, [turn.id]: { ...current.current.turns[turn.id], facts: event.target.value.split('\n').map(fact => fact.trim().slice(0, 300)).filter(Boolean).slice(0, 20) } } })}/></label>
+          {Object.keys(turn.state ?? {}).length > 0 && <>
+            <h3>Current story state</h3>
+            <dl>{Object.entries(turn.state).map(([key, value]) => <div key={key}>
+              <dt>{key.replaceAll('.', ' · ').replaceAll('-', ' ')}</dt><dd>{value}</dd>
+            </div>)}</dl>
+          </>}
           <form className="editor" onSubmit={event => {
             event.preventDefault()
             const artStyle = new FormData(event.currentTarget).get('artStyle').trim()

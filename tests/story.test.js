@@ -120,3 +120,23 @@ test('a change in player viewpoint triggers fresh art for the same character and
   assert.equal(imageRequest(start.world, turn.scene).scene.viewpoint, 'low')
   assert.equal(imageRequest(start.world, turn.scene, { viewpoint: 'high' }).scene.viewpoint, 'high')
 })
+
+test('taking the key replaces its holder, retires stale memory, and keeps the rewind state', () => {
+  const start = createCampaign()
+  const withMara = addTurn(start, 'mara-key', 'You give Mara the brass key.', result(start, {
+    facts: ['Mara has the brass key.', 'You promised to meet Mara at the ferry.'],
+    stateChanges: [{ key: 'item.brass-key.holder', value: 'Mara' }],
+  }))
+  const withPlayer = addTurn(withMara, 'player-key', 'You take the brass key from Mara.', result(withMara, {
+    facts: withMara.turns['mara-key'].facts,
+    stateChanges: [{ key: 'item.brass-key.holder', value: 'Player' }],
+    supersededFacts: ['Mara has the brass key'],
+  }))
+  const context = JSON.parse(requestFor(withPlayer, 'You inspect the key.').messages[1].content)
+  assert.equal(context.currentState['item.brass-key.holder'], 'Player')
+  assert.deepEqual(context.facts, ['You promised to meet Mara at the ferry.'])
+  assert.equal(context.recent.at(-2).playerEntry, 'You give Mara the brass key.')
+  const rewind = { ...withPlayer, active: 'mara-key' }
+  const oldContext = JSON.parse(requestFor(rewind, 'You wait.').messages[1].content)
+  assert.equal(oldContext.currentState['item.brass-key.holder'], 'Mara')
+})
