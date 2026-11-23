@@ -78,4 +78,4 @@ ollama pull gemma3:4b
 NIGHTDRAFT_VISION_MODEL=gemma3:4b HF_HUB_DISABLE_IMPLICIT_TOKEN=1 python local_server.py
 ```
 
-Image review checks the visible character, action, and essential props. When the first image misses, the app tries one more sample. If both miss, the turn keeps its prior illustration or reference and shows the reason. The vision model shares memory with SDXL, so Nightdraft releases SDXL between a render and review. This makes reviewed renders slower. A model verdict is an approximation and can itself be wrong. Leave the vision setting unset to keep using unreviewed local renders.
+Image review first describes the visible character, action, and props without seeing the scene prompt, then compares that description with the requested scene. When the first image misses, the app tries one more sample. If both miss, the turn keeps its prior illustration or reference and shows the reason. The vision model shares memory with SDXL, so Nightdraft releases SDXL between a render and review. This makes reviewed renders slower. A model verdict is an approximation and can itself be wrong. Leave the vision setting unset to keep using unreviewed local renders.

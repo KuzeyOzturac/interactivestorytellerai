@@ -166,6 +166,14 @@ class ModelReviewTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Wrong holder"):
                 local_server.narrate({"messages": messages, "format": {}})
 
+    def test_blind_observation_rejects_wrong_count_and_worn_coat(self):
+        data = {"scene": {"action": "Hangs a wet raincoat on a wall hook", "wardrobe": "Burgundy sweater"}}
+        with patch.object(local_server, "ollama_json") as compare:
+            self.assertFalse(local_server.compare_image_observation(data, {"people": 0})[0])
+            verdict = local_server.compare_image_observation(data, {"people": 1, "wearing": "A tan trench coat"})
+            self.assertEqual(verdict, (False, "The garment to hang is still being worn."))
+            compare.assert_not_called()
+
     def test_image_review_retries_and_keeps_only_the_accepted_render(self):
         with patch.object(local_server, "VISION_MODEL", "vision"), \
              patch.object(local_server, "illustrate", side_effect=[{"image": "plant"}, {"image": "person"}]) as render, \

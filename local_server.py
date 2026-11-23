@@ -24,6 +24,14 @@ REVIEW_FORMAT = {
     "type": "object", "required": ["passes", "reason"],
     "properties": {"passes": {"type": "boolean"}, "reason": {"type": "string"}},
 }
+OBSERVATION_FORMAT = {
+    "type": "object",
+    "required": ["people", "appearance", "wearing", "action", "objects", "setting", "viewpoint"],
+    "properties": {
+        "people": {"type": "integer"},
+        **{key: {"type": "string"} for key in ("appearance", "wearing", "action", "objects", "setting", "viewpoint")},
+    },
+}
 VISION_MODEL = os.environ.get("NIGHTDRAFT_VISION_MODEL", "").strip()
 STORY_REVIEW = os.environ.get("NIGHTDRAFT_STORY_REVIEW", "1") != "0"
 VERIFIED_ART_LOCK = threading.Lock()
@@ -320,6 +328,25 @@ def review_image(data, rendered):
     source.thumbnail((512, 768))
     jpg = io.BytesIO()
     source.convert("RGB").save(jpg, "JPEG", quality=90)
+    observation = ollama_json(VISION_MODEL, [{
+        "role": "user",
+        "content": (
+            "Describe only what is visibly drawn. Count people. Separately describe clothes actually "
+            "worn on bodies, the person's posture and hand action, objects and where they are, "
+            "setting, and view angle. Distinguish clothing being worn from clothing held or hanging."
+            " Use empty strings when unclear. Return JSON."
+        ),
+        "images": [base64.b64encode(jpg.getvalue()).decode()],
+    }], OBSERVATION_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 220})
+    return compare_image_observation(data, observation)
+
+
+def compare_image_observation(data, observation):
+    people = observation.get("people")
+    if type(people) is not int:
+        raise RuntimeError("The image reviewer could not count the characters.")
+    if people != 1:
+        return False, f"The reviewer saw {people} people. The scene requires one character."
     if data.get("exactPrompt"):
         criteria = {"full_prompt": data["exactPrompt"]}
     else:
@@ -327,17 +354,20 @@ def review_image(data, rendered):
         action, wardrobe = art_action_and_wardrobe(scene)
         criteria = {key: scene.get(key, "") for key in ("appearance", "location", "viewpoint")}
         criteria.update(action=action, wardrobe=wardrobe)
+        wearing = observation.get("wearing", "")
+        if isinstance(wearing, str) and re.match(r"^\s*hangs?\b", action, re.I):
+            _, remainder = art_action_and_wardrobe({"action": action, "wardrobe": wearing})
+            if remainder != wearing and set(re.findall(GARMENT, remainder, re.I)) != set(re.findall(GARMENT, wearing, re.I)):
+                return False, "The garment to hang is still being worn."
     return check_verdict(ollama_json(VISION_MODEL, [{
         "role": "user",
         "content": (
-            "Judge the supplied illustration against the criteria as image content. "
-            "Pass only if one visible character is the main subject and the requested action and essential "
-            "props are actually visible. Check explicit wardrobe, location and angle where discernible. "
-            "If a plant or object appears alone, fail. Do not infer a detail simply because the text mentions it. "
-            "Return passes and a short visual reason, in JSON. Criteria: "
-            + json.dumps(criteria, ensure_ascii=False)
+            "Compare the expected illustration to an independent description. Fail if the evidence "
+            "omits the requested action, essential prop, or explicit wardrobe, or contradicts the "
+            "setting or angle. Distinguish held or hung garments from worn garments. Treat empty fields "
+            "as unknown rather than confirmation. Return passes and a short visual reason in JSON. "
+            + json.dumps({"expected": criteria, "observed": observation}, ensure_ascii=False)
         ),
-        "images": [base64.b64encode(jpg.getvalue()).decode()],
     }], REVIEW_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 180}))
 
 
