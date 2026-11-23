@@ -13,7 +13,7 @@ export const starter = {
 export const openingChoices = ['You ask Mara what happened to the ferry.', 'You examine the brass key.']
 export function createCampaign(world = starter) {
   return {
-    version: 1, world, active: 'opening',
+    version: 1, id: globalThis.crypto.randomUUID(), world, active: 'opening',
     turns: { opening: {
       id: 'opening', parent: null, input: '', prose: world.opening,
       choices: world === starter ? openingChoices : [],
@@ -94,7 +94,7 @@ export function requestFor(campaign, input) {
         'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
         'Current state is authoritative over earlier passages and summaries. The newest established player entry can change current state immediately. Use stateChanges for changed, mutable facts such as who holds an object, whether a door is locked, or where someone is. Reuse the same key for the same property, for example item.brass-key.holder. An empty value clears an obsolete property. Leave unchanged properties out.',
         'Example: current state says item.brass-key.holder = Mara. The player writes "You take the brass key from Mara." Set item.brass-key.holder = Player and continue with Player holding it. If facts contains "Mara has the brass key", include that exact fact in supersededFacts and remove it from facts. Keep historical events in the summary explicitly in the past. Mere attempts, doubts, and dialogue claims do not change state by themselves.',
-        'Use facts for durable context. Omit mutable facts already captured in currentState or stateChanges. Write supersededFacts as exact copies of outdated facts from the supplied facts list.',
+        'Relevant memories are historical events from this branch. Current state takes precedence. Use facts for durable context. Omit mutable facts already captured in currentState or stateChanges. Write supersededFacts as exact copies of outdated facts from the supplied facts list.',
         'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
         'For scene.action, write one short visible action for the NPC, such as "Sits on the floor". Choose the main pose or gesture and omit secondary actions, gaze and incidental props. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list discarded clothing as worn. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
         'For scene.viewpoint, use the player’s physical view of the NPC: low for looking up, high for looking down, close for moving very near, side for seeing the NPC in profile, eye-level for a normal front view. Retain the previous viewpoint if the player has not moved or changed how they look at the NPC. Use an empty string if there is no meaningful angle or the player is alone. Keep the player out of frame.',
@@ -105,10 +105,26 @@ export function requestFor(campaign, input) {
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
         summary: current.summary, facts: current.facts, currentState: current.state ?? {}, scene: current.scene,
         recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
+        relevantMemories: recallMemories(turns, input),
         playerEntry: input,
       }) },
     ],
   }
+}
+
+function recallMemories(turns, input) {
+  const terms = text => new Set(text.toLowerCase().match(/[\p{L}\p{N}]{4,}/gu) || [])
+  const query = terms(input)
+  for (const common of ['that', 'this', 'with', 'about', 'there', 'what', 'your', 'from', 'have', 'would']) query.delete(common)
+  const score = text => [...terms(text)].filter(word => query.has(word)).length
+  return turns.slice(1, -5)
+    .map(turn => ({
+      playerEntry: turn.input.slice(0, 220),
+      event: isNarratorCommentary(turn.prose) ? '' : turn.prose.slice(0, 280),
+    }))
+    .map(memory => ({ memory, score: score(memory.playerEntry + ' ' + memory.event) }))
+    .filter(entry => entry.score > 0).sort((a, b) => b.score - a.score)
+    .slice(0, 3).map(entry => entry.memory)
 }
 
 export function isNarratorCommentary(prose) {
@@ -164,7 +180,7 @@ export function addTurn(campaign, id, input, result) {
     facts: checkedList(result.facts, 20).filter(fact => !superseded.has(normalizeFact(fact))),
     state: updateState(previous.state, result.stateChanges),
     imageStyle: previous.imageStyle,
-    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artStyle || '') ? previous.image : '',
+    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artRevision || campaign.world.artStyle || '') ? previous.image : '',
   }
   return { ...campaign, active: id, turns: { ...campaign.turns, [id]: turn } }
 }
@@ -228,6 +244,8 @@ export function imageRequest(world, scene, direction = {}) {
   return {
     reference: character.reference,
     exactPrompt: direction.exactPrompt || '',
+    styleReference: world.styleReference || '',
+    depthGuide: direction.depthGuide || '',
     scene: {
       action: direction.action || scene.action.split(',')[0].trim(), location: direction.location || scene.location,
       wardrobe: direction.wardrobe ?? scene.wardrobe ?? '',

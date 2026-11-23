@@ -140,3 +140,14 @@ test('taking the key replaces its holder, retires stale memory, and keeps the re
   const oldContext = JSON.parse(requestFor(rewind, 'You wait.').messages[1].content)
   assert.equal(oldContext.currentState['item.brass-key.holder'], 'Mara')
 })
+
+test('older relevant events are recalled only from the active branch', () => {
+  const start = createCampaign()
+  let branch = addTurn(start, 'promise', 'You promise to meet Mara at the ferry.', result(start))
+  for (let index = 0; index < 6; index++) {
+    branch = addTurn(branch, 'later-' + index, 'You watch the storm.', result(branch))
+  }
+  const request = campaign => JSON.parse(requestFor(campaign, 'You ask about the ferry.').messages[1].content)
+  assert.match(request(branch).relevantMemories[0].playerEntry, /promise/)
+  assert.deepEqual(request({ ...branch, active: 'opening' }).relevantMemories, [])
+})

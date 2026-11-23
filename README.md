@@ -51,3 +51,18 @@ python tests/render_character.py brass-key brass-key.webp
 ```
 
 Use fresh output filenames for repeated samples. An HTTP success only confirms a render completed. Check the visible action, location, clothing, props, and character likeness in the image. To see the exact text passed to SDXL, start the local server with `NIGHTDRAFT_LOG_ART_PROMPT=1`. This prints private scene descriptions to your terminal, so leave it off for ordinary play.
+
+### Campaigns, references, and model comparisons
+
+**Campaigns** saves worlds separately and includes **Start The Last Stop again**. The existing local campaign is added to the library on first load. **Journal → Style reference** accepts an optional image alongside the text style. **Adjust illustration → Depth guide** accepts a grayscale depth map for the current turn. The first use downloads additional model weights. Switching reference modes reloads the relevant pipeline from cache and can take time or need more memory. Default negative conditioning weights emphasize common anatomy, blur, and layout problems.
+
+With Nightdraft running, compare narration profiles and render the same illustration with fixed seeds. Inspect the actual images for pose, camera angle, likeness, and style.
+
+```sh
+node tests/benchmark_narrator.js
+python tests/render_character.py sitting sitting-31.webp --seed 31
+python tests/render_character.py coat-hook coat-31.webp --seed 31
+python tests/render_character.py looking-up angle-31.webp --seed 31
+```
+
+The image test also accepts `--style`, `--style-reference`, `--depth-guide`, `--prompt`, and `--unweighted-negatives` for comparison. Use the same seed and input while changing one option, then repeat with other seeds. Set `NIGHTDRAFT_BENCH_SEED` to compare narrator profiles at another seed.

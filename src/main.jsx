@@ -2,7 +2,7 @@ import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
 import { addTurn, attachImage, cameraAngles, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
-import { readCampaign, writeCampaign } from './storage.js'
+import { listCampaigns, readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
 const asset = path => path?.startsWith('data:') ? path : path ? import.meta.env.BASE_URL + path : ''
@@ -53,6 +53,7 @@ function App() {
   const [artError, setArtError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [autoArt, setAutoArt] = useState(() => localStorage.getItem('nightdraft-auto-art') !== 'off')
+  const [library, setLibrary] = useState([])
   const [panel, setPanel] = useState('')
   const dialog = useRef(null)
   const current = useRef(campaign)
@@ -67,7 +68,7 @@ function App() {
     let alive = true
     readCampaign().then(saved => {
       if (alive && saved) {
-        const recovered = recoverCharacterIllustrations(saved)
+        const recovered = recoverCharacterIllustrations({ ...saved, id: saved.id || crypto.randomUUID() })
         current.current = recovered
         setCampaign(recovered)
         if (autoArt && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
@@ -92,10 +93,33 @@ function App() {
     current.current = next
     setCampaign(next)
   }
-  function replace(next) {
+  async function openLibrary() {
+    try {
+      await writeCampaign(current.current)
+      setLibrary(await listCampaigns())
+      setPanel('library')
+    } catch {
+      setError('Could not open saved campaigns.')
+    }
+  }
+  async function resumeCampaign(id) {
+    try {
+      const saved = await readCampaign(id)
+      if (saved) replace(recoverCharacterIllustrations(saved))
+    } catch {
+      setError('Could not load that campaign.')
+    }
+  }
+  async function replace(next) {
     for (const controller of activeRenders.current.values()) controller.abort()
     activeRenders.current.clear()
     setRendering([])
+    try {
+      await writeCampaign(next, current.current)
+    } catch {
+      setError('Could not save the campaign. Export a backup and try again.')
+      return
+    }
     setArtError('')
     setError('')
     setInput('')
@@ -127,7 +151,7 @@ function App() {
       if (!response.ok || !data?.image?.startsWith('data:image/webp;base64,')) {
         throw new Error(data?.error || 'Scene art is unavailable. Start the local server and check the image setup.')
       }
-      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image, request.scene.style))
+      if (!controller.signal.aborted) update(attachImage(current.current, id, data.image, snapshot.world.artRevision || request.scene.style))
     } catch (failure) {
       if (!controller.signal.aborted && current.current.active === id) setArtError(failure.message)
     } finally {
@@ -137,13 +161,34 @@ function App() {
       }
     }
   }
-  function reviseArt(event) {
+  async function readArtFile(file) {
+    if (!file) return ''
+    if (file.size > 1_500_000 || !['image/png', 'image/jpeg', 'image/webp'].includes(file.type)) {
+      throw new Error('Choose a PNG, JPEG, or WebP under 1.5 MB.')
+    }
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = () => resolve(reader.result)
+      reader.onerror = () => reject(new Error('Could not read that image.'))
+      reader.readAsDataURL(file)
+    })
+  }
+  async function reviseArt(event) {
     event.preventDefault()
     const fields = new FormData(event.currentTarget)
     const artDirection = Object.fromEntries(['action', 'location', 'wardrobe', 'viewpoint', 'exactPrompt'].map(field => [field, fields.get(field).trim()]))
     const base = current.current
     const selected = base.turns[base.active]
-    const next = { ...base, turns: { ...base.turns, [selected.id]: { ...selected, artDirection } } }
+    try {
+      artDirection.depthGuide = fields.get('clearDepth') ? '' :
+        await readArtFile(fields.get('depthGuide').size ? fields.get('depthGuide') : null) || selected.artDirection?.depthGuide || ''
+    } catch (failure) {
+      setArtError(failure.message)
+      return
+    }
+    if (current.current.id !== base.id || current.current.active !== selected.id) return
+    const latest = current.current
+    const next = { ...latest, turns: { ...latest.turns, [selected.id]: { ...latest.turns[selected.id], artDirection } } }
     update(next)
     void renderArt(next)
   }
@@ -191,7 +236,7 @@ function App() {
             !Array.isArray(item.facts) || !item.scene || typeof item.scene.location !== 'string') throw new Error()
         history(data, id)
       }
-      replace(recoverCharacterIllustrations(data))
+      replace(recoverCharacterIllustrations({ ...data, id: crypto.randomUUID() }))
     } catch {
       setError('Choose a valid Nightdraft campaign export.')
     }
@@ -200,6 +245,7 @@ function App() {
   return <>
     <header className="masthead"><div className="brand"><Feather size={24}/><span>Nightdraft</span></div>
       <nav aria-label="Campaign controls">
+        <button disabled={busy || !loaded} onClick={openLibrary}>Campaigns</button>
         <button disabled={busy || !loaded} onClick={() => setPanel('world')}><BookOpen size={18}/> <span>New world</span></button>
         <button disabled={busy || !loaded} onClick={() => setPanel('journal')}><Notebook size={18}/> <span>Journal</span></button>
       </nav>
@@ -260,6 +306,8 @@ function App() {
               {Object.entries(cameraAngles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
             <label>Exact image prompt <small>Optional. Replaces the automatic prompt when filled in.</small><textarea name="exactPrompt" defaultValue={turn.artDirection?.exactPrompt ?? ''} maxLength="300" rows="2"/></label>
+            <label>Depth guide <small>Optional grayscale depth map to guide pose and framing.</small><input name="depthGuide" type="file" accept="image/png,image/jpeg,image/webp"/></label>
+            {turn.artDirection?.depthGuide && <label><input type="checkbox" name="clearDepth"/> Remove saved depth guide</label>}
             <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
           </form>
         </details>}
@@ -269,9 +317,12 @@ function App() {
       </aside>
     </main>
     <dialog ref={dialog} onClose={() => setPanel('')} aria-labelledby="dialog-title">
-      <div className="dialog-heading"><h2 id="dialog-title">{panel === 'world' ? 'Create a world' : 'Campaign journal'}</h2>
+      <div className="dialog-heading"><h2 id="dialog-title">{panel === 'world' ? 'Create a world' : panel === 'library' ? 'Saved campaigns' : 'Campaign journal'}</h2>
         <button aria-label="Close dialog" onClick={() => setPanel('')}><X size={20}/></button></div>
-      {panel === 'world' ? <><p>Starting a world replaces the current campaign. Export a copy to keep it.</p><button onClick={() => exportJSON(campaign)}><DownloadSimple size={18}/> Export current campaign</button><WorldEditor onCreate={replace}/></> : panel === 'journal' &&
+      {panel === 'library' ? <>
+        <button onClick={() => replace(createCampaign())}>Start The Last Stop again</button>
+        <ul>{library.map(save => <li key={save.id}><button onClick={() => resumeCampaign(save.id)} disabled={save.id === campaign.id}>{save.title}</button></li>)}</ul>
+      </> : panel === 'world' ? <><p>Your current campaign stays in Saved campaigns.</p><button onClick={() => exportJSON(campaign)}><DownloadSimple size={18}/> Export current campaign</button><WorldEditor onCreate={replace}/></> : panel === 'journal' &&
         <>
           <div className="journal-actions"><button onClick={() => exportJSON(campaign)}><DownloadSimple size={18}/> Export</button>
             <label className="upload"><UploadSimple size={18}/> Import campaign<input type="file" accept=".json,application/json" onChange={importCampaign}/></label></div>
@@ -286,16 +337,29 @@ function App() {
               <dt>{key.replaceAll('.', ' · ').replaceAll('-', ' ')}</dt><dd>{value}</dd>
             </div>)}</dl>
           </>}
-          <form className="editor" onSubmit={event => {
+          <form className="editor" onSubmit={async event => {
             event.preventDefault()
-            const artStyle = new FormData(event.currentTarget).get('artStyle').trim()
-            const base = current.current
-            update({ ...base, world: { ...base.world, artStyle } })
-            setPanel('')
+            const fields = new FormData(event.currentTarget)
+            const artStyle = fields.get('artStyle').trim()
+            const id = current.current.id
+            try {
+              const file = fields.get('styleReference')
+              const uploaded = await readArtFile(file.size ? file : null)
+              const base = current.current
+              if (base.id !== id) return
+              const styleReference = fields.get('clearStyle') ? '' : uploaded || base.world.styleReference || ''
+              const changed = artStyle !== (base.world.artStyle || '') || styleReference !== (base.world.styleReference || '')
+              if (changed) update({ ...base, world: { ...base.world, artStyle, styleReference, artRevision: crypto.randomUUID() } })
+              setPanel('')
+            } catch (failure) {
+              setError(failure.message)
+            }
           }}>
             <label>Art style <small>Used for automatic illustrations in this world. Leave blank for no style prompt.</small>
               <input name="artStyle" defaultValue={campaign.world.artStyle || ''} placeholder="e.g. muted watercolor" maxLength="70"/>
             </label>
+            <label>Style reference <small>Optional image for palette and brushwork.</small><input type="file" name="styleReference" accept="image/png,image/jpeg,image/webp"/></label>
+            {campaign.world.styleReference && <label><input type="checkbox" name="clearStyle"/> Remove style reference</label>}
             <button>Save art style</button>
           </form>
           <h3>Character references</h3>

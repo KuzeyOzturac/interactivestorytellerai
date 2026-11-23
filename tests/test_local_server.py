@@ -79,6 +79,26 @@ class ScenePromptTest(unittest.TestCase):
             self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
 
+    def test_unweighted_comparison_uses_the_same_negative_groups(self):
+        result = local_server.negative_conditioning(None, weighted=False)
+        self.assertIn("collage", result["negative_prompt"])
+        self.assertIn("malformed hands", result["negative_prompt"])
+
+    @unittest.skipUnless(os.environ.get("NIGHTDRAFT_REAL_TOKENIZERS"), "requires the model-test environment")
+    def test_weighted_negative_conditioning_blends_token_and_pooled_embeddings(self):
+        import numpy as np
+
+        class Pipeline:
+            def encode_prompt(self, prompts, do_classifier_free_guidance):
+                self.prompts = prompts
+                return np.array([[0], [2], [4]]), None, np.array([[1], [3], [5]]), None
+
+        pipe = Pipeline()
+        conditioning = local_server.negative_conditioning(pipe)
+        self.assertAlmostEqual(conditioning["negative_prompt_embeds"].item(), 3.75)
+        self.assertAlmostEqual(conditioning["negative_pooled_prompt_embeds"].item(), 4.75)
+        self.assertIn("malformed hands", pipe.prompts[2])
+
     @unittest.skipUnless(os.environ.get("NIGHTDRAFT_REAL_TOKENIZERS"), "requires SDXL tokenizer files")
     def test_reported_apartment_prompt_with_real_sdxl_tokenizers(self):
         from transformers import CLIPTokenizer

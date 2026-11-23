@@ -14,14 +14,22 @@ ROOT = Path(__file__).resolve().parent
 MODEL = os.environ.get("NIGHTDRAFT_MODEL", "qwen3:4b")
 OLLAMA = os.environ.get("NIGHTDRAFT_OLLAMA", "http://127.0.0.1:11434")
 PIPELINE = None
+PIPELINE_MODE = None
 IMAGE_LOCK = threading.Lock()
 
 
 def narrate(data):
+    sampling = {
+        "baseline": {"temperature": 0.75},
+        "qwen": {"temperature": 0.7, "top_p": 0.8, "top_k": 20},
+        "steady": {"temperature": 0.3, "top_p": 0.8, "top_k": 20},
+    }.get(data.get("sampling"), {"temperature": 0.75})
+    if type(data.get("seed")) is int:
+        sampling["seed"] = data["seed"]
     body = json.dumps({
         "model": MODEL, "stream": False, "think": False, "keep_alive": 0,
         "format": data["format"], "messages": data["messages"],
-        "options": {"num_ctx": 8192, "num_predict": 2300, "temperature": 0.75},
+        "options": {"num_ctx": 8192, "num_predict": 2300, **sampling},
     }).encode()
     request = Request(f"{OLLAMA}/api/chat", body, {"Content-Type": "application/json"})
     try:
@@ -73,48 +81,106 @@ def scene_prompt(scene, tokenizers, exact_prompt=""):
     return ", ".join(pieces)
 
 
+NEGATIVE_GROUPS = (
+    ("multiple people, duplicate person, collage, comic strip, split screen, text, watermark", 1.15),
+    ("blurry, low detail, distorted anatomy, extra limbs, malformed hands", 1.3),
+)
+
+
+def negative_conditioning(pipe, weighted=True):
+    if not weighted:
+        return {"negative_prompt": ", ".join(text for text, _ in NEGATIVE_GROUPS)}
+    groups = [("", 0.0), *NEGATIVE_GROUPS]
+    embedded, _, pooled, _ = pipe.encode_prompt(
+        [text for text, _ in groups], do_classifier_free_guidance=False
+    )
+
+    def blend(tensor):
+        baseline = tensor[0:1]
+        return baseline + sum(
+            (tensor[index:index + 1] - baseline) * weight
+            for index, (_, weight) in enumerate(groups[1:], 1)
+        ) / (len(groups) - 1)
+
+    return {
+        "negative_prompt_embeds": blend(embedded),
+        "negative_pooled_prompt_embeds": blend(pooled),
+    }
+
+
 def illustrate(data):
-    global PIPELINE
+    global PIPELINE, PIPELINE_MODE
     try:
         import torch
-        from diffusers import StableDiffusionXLPipeline
+        from diffusers import ControlNetModel, StableDiffusionXLControlNetPipeline, StableDiffusionXLPipeline
         from PIL import Image, ImageOps
     except ImportError as error:
         raise RuntimeError("Install the local image dependencies listed in the README to render a scene.") from error
 
     with IMAGE_LOCK, torch.inference_mode():
-        if PIPELINE is None:
+        style_reference = data.get("styleReference", "")
+        depth_guide = data.get("depthGuide", "")
+        mode = (bool(style_reference), bool(depth_guide))
+        if PIPELINE is None or PIPELINE_MODE != mode:
+            PIPELINE = None
             cuda = torch.cuda.is_available()
             if not cuda and not torch.backends.mps.is_available() and os.environ.get("NIGHTDRAFT_CPU_ART") != "1":
                 raise RuntimeError("No CUDA or Apple Metal device detected. Enable CPU art in the README if desired.")
-            pipeline = StableDiffusionXLPipeline.from_pretrained(
-                "stabilityai/stable-diffusion-xl-base-1.0",
-                torch_dtype=torch.float16 if cuda or torch.backends.mps.is_available() else torch.float32,
-                use_safetensors=True,
-                **({"variant": "fp16"} if cuda or torch.backends.mps.is_available() else {}),
+            gpu = cuda or torch.backends.mps.is_available()
+            dtype = torch.float16 if gpu else torch.float32
+            load_options = {"torch_dtype": dtype, "use_safetensors": True}
+            if gpu:
+                load_options["variant"] = "fp16"
+            pipeline_class = StableDiffusionXLPipeline
+            if depth_guide:
+                pipeline_class = StableDiffusionXLControlNetPipeline
+                load_options["controlnet"] = ControlNetModel.from_pretrained(
+                    "diffusers/controlnet-depth-sdxl-1.0-small", torch_dtype=dtype, use_safetensors=True
+                )
+            pipeline = pipeline_class.from_pretrained("stabilityai/stable-diffusion-xl-base-1.0", **load_options)
+            face_weight = "ip-adapter-plus-face_sdxl_vit-h.safetensors"
+            style_weight = "ip-adapter-plus_sdxl_vit-h.safetensors"
+            pipeline.load_ip_adapter(
+                "h94/IP-Adapter", subfolder="sdxl_models",
+                weight_name=[face_weight, style_weight] if style_reference else face_weight,
+                image_encoder_folder="models/image_encoder",
             )
-            pipeline.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models",
-                                     weight_name="ip-adapter-plus-face_sdxl_vit-h.safetensors",
-                                     image_encoder_folder="models/image_encoder")
             if cuda:
                 pipeline.enable_model_cpu_offload()
             elif torch.backends.mps.is_available():
                 pipeline.to("mps")
             PIPELINE = pipeline
+            PIPELINE_MODE = mode
+        def decode_image(value):
+            if not value.startswith(("data:image/png;base64,", "data:image/webp;base64,", "data:image/jpeg;base64,")):
+                raise ValueError("Image guides must be PNG, WebP, or JPEG.")
+            return Image.open(io.BytesIO(base64.b64decode(value.split(",", 1)[1], validate=True))).convert("RGB")
+
         reference = data.get("reference", "")
-        if reference.startswith(("data:image/png;base64,", "data:image/webp;base64,", "data:image/jpeg;base64,")):
-            source = Image.open(io.BytesIO(base64.b64decode(reference.split(",", 1)[1], validate=True)))
-        elif reference == "mara.webp":
-            source = Image.open(ROOT / "public" / reference)
-            source = source.crop((175, 85, 620, 530))
+        if reference == "mara.webp":
+            source = Image.open(ROOT / "public" / reference).crop((175, 85, 620, 530))
+        elif reference:
+            source = decode_image(reference)
         else:
             source = Image.new("RGB", (224, 224))
-        PIPELINE.set_ip_adapter_scale(0.12 if reference else 0.0)
+        face = ImageOps.fit(source.convert("RGB"), (224, 224))
+        adapter_images = [face, ImageOps.fit(decode_image(style_reference), (224, 224))] if style_reference else face
+        style_scale = 0.25
+
+        def set_reference_strength(pipe, face_scale):
+            pipe.set_ip_adapter_scale([face_scale, style_scale] if style_reference else face_scale)
+
+        set_reference_strength(PIPELINE, 0.12 if reference else 0.0)
 
         def add_likeness_after_layout(pipe, step, _timestep, callback_kwargs):
             if step == 11:
-                pipe.set_ip_adapter_scale(0.35)
+                set_reference_strength(pipe, 0.35)
             return callback_kwargs
+
+        controls = {}
+        if depth_guide:
+            depth = ImageOps.fit(decode_image(depth_guide).convert("L"), (512, 768)).convert("RGB")
+            controls = {"image": depth, "controlnet_conditioning_scale": 0.65}
 
         prompt = scene_prompt(data["scene"], (PIPELINE.tokenizer, PIPELINE.tokenizer_2), data.get("exactPrompt", ""))
         if os.environ.get("NIGHTDRAFT_LOG_ART_PROMPT") == "1":
@@ -125,10 +191,11 @@ def illustrate(data):
         image = PIPELINE(
             prompt=prompt,
             generator=torch.Generator(device="cpu").manual_seed(seed) if seed is not None else None,
-            negative_prompt="multiple people, duplicate person, collage, comic strip, split screen, disembodied hands, text, watermark",
-            ip_adapter_image=ImageOps.fit(source.convert("RGB"), (224, 224)),
+            ip_adapter_image=adapter_images,
             height=768, width=512, num_inference_steps=30,
             callback_on_step_end=add_likeness_after_layout if reference else None,
+            **negative_conditioning(PIPELINE, data.get("weightedNegatives", True)),
+            **controls,
         ).images[0]
         output = io.BytesIO()
         image.save(output, "WEBP", quality=88)
@@ -151,7 +218,7 @@ class Handler(SimpleHTTPRequestHandler):
             return self.reply(415, {"error": "JSON required."})
         try:
             size = int(self.headers.get("Content-Length", "0"))
-            if not 0 < size <= 8_000_000:
+            if not 0 < size <= 12_000_000:
                 return self.reply(413, {"error": "The request is too large or empty."})
             data = json.loads(self.rfile.read(size))
             self.reply(200, handler(data))
