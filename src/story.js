@@ -242,7 +242,7 @@ export function imageRequest(world, scene, direction = {}) {
   const appearance = bundled?.name === character.name && defaultAppearance.includes(character.appearance)
     ? bundled.appearance : character.appearance
   return {
-    reference: character.reference,
+    reference: direction.disableFace ? '' : character.reference,
     exactPrompt: direction.exactPrompt || '',
     styleReference: world.styleReference || '',
     depthGuide: direction.depthGuide || '',

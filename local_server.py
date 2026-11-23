@@ -184,7 +184,7 @@ def illustrate(data):
 
         reference = data.get("reference", "")
         if reference == "mara.webp":
-            source = Image.open(ROOT / "public" / reference).crop((175, 85, 620, 530))
+            source = Image.open(ROOT / "public" / reference).crop((280, 176, 520, 416))
         elif reference:
             source = decode_image(reference)
         else:

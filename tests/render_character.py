@@ -43,6 +43,7 @@ def main():
     parser.add_argument("--style-reference", type=Path)
     parser.add_argument("--depth-guide", type=Path)
     parser.add_argument("--unweighted-negatives", action="store_true")
+    parser.add_argument("--no-face-reference", action="store_true")
     args = parser.parse_args()
 
     def image_data(path):
@@ -53,7 +54,7 @@ def main():
     scene = {**CASES[args.case], "appearance": "Adult woman with olive skin and a short dark bob"}
     scene["style"] = args.style
     body = json.dumps({
-        "scene": scene, "reference": "mara.webp", "seed": args.seed, "exactPrompt": args.prompt,
+        "scene": scene, "reference": "" if args.no_face_reference else "mara.webp", "seed": args.seed, "exactPrompt": args.prompt,
         "styleReference": image_data(args.style_reference), "depthGuide": image_data(args.depth_guide),
         "weightedNegatives": not args.unweighted_negatives,
     }).encode()

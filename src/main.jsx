@@ -136,7 +136,7 @@ function App() {
     const selected = snapshot.turns[id]
     const request = imageRequest(snapshot.world, selected.scene, selected.artDirection)
     if (!request || activeRenders.current.has(id)) return
-    if (!request.reference) {
+    if (!request.reference && !selected.artDirection?.disableFace) {
       request.reference = history(snapshot).find(entry => entry.scene.focus === selected.scene.focus && entry.image)?.image || ''
     }
     const controller = new AbortController()
@@ -177,6 +177,7 @@ function App() {
     event.preventDefault()
     const fields = new FormData(event.currentTarget)
     const artDirection = Object.fromEntries(['action', 'location', 'wardrobe', 'viewpoint', 'exactPrompt'].map(field => [field, fields.get(field).trim()]))
+    artDirection.disableFace = fields.has('disableFace')
     const base = current.current
     const selected = base.turns[base.active]
     try {
@@ -306,6 +307,7 @@ function App() {
               {Object.entries(cameraAngles).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
             </select></label>
             <label>Exact image prompt <small>Optional. Replaces the automatic prompt when filled in.</small><textarea name="exactPrompt" defaultValue={turn.artDirection?.exactPrompt ?? ''} maxLength="300" rows="2"/></label>
+            <label><input type="checkbox" name="disableFace" defaultChecked={Boolean(turn.artDirection?.disableFace)}/> Render without the face reference</label>
             <label>Depth guide <small>Optional grayscale depth map to guide pose and framing.</small><input name="depthGuide" type="file" accept="image/png,image/jpeg,image/webp"/></label>
             {turn.artDirection?.depthGuide && <label><input type="checkbox" name="clearDepth"/> Remove saved depth guide</label>}
             <button disabled={rendering.includes(turn.id) || !loaded}>Render with changes</button>
