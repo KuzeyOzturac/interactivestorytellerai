@@ -84,6 +84,10 @@ class ScenePromptTest(unittest.TestCase):
         action, wardrobe = local_server.art_action_and_wardrobe(scene)
         self.assertEqual(action, "Hangs wet coat on a hook")
         self.assertEqual(wardrobe, "a burgundy sweater")
+        scene["wardrobe"] = "Wearing a navy-blue trench coat"
+        self.assertEqual(local_server.art_action_and_wardrobe(
+            scene, "Tan raincoat over a burgundy sweater"
+        )[1], "a burgundy sweater")
         scene["action"] = "Sits on the floor"
         self.assertEqual(local_server.art_action_and_wardrobe(scene), (scene["action"], scene["wardrobe"]))
 

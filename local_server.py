@@ -41,7 +41,20 @@ def narrate(data):
     except URLError as error:
         raise RuntimeError("Start Ollama on this computer, then try again.") from error
     try:
-        return json.loads(result["message"]["content"])
+        turn = json.loads(result["message"]["content"])
+        try:
+            context = json.loads(data["messages"][-1]["content"])
+        except (IndexError, KeyError, TypeError, json.JSONDecodeError):
+            return turn
+        scene = turn.get("scene") if isinstance(turn, dict) else None
+        previous = context.get("scene", {}) if isinstance(context, dict) else {}
+        if isinstance(scene, dict) and isinstance(previous, dict) and isinstance(scene.get("action"), str):
+            declared = context.get("playerVisibleAction")
+            if isinstance(declared, dict) and isinstance(declared.get("action"), str):
+                scene.update(action=declared["action"], focus=declared["focus"])
+            prior_wardrobe = previous.get("wardrobe", "") if scene.get("focus") == previous.get("focus") else ""
+            scene["action"], scene["wardrobe"] = art_action_and_wardrobe(scene, prior_wardrobe)
+        return turn
     except (KeyError, json.JSONDecodeError) as error:
         raise RuntimeError("The local model returned an incomplete turn. Try again.") from error
 
@@ -49,11 +62,11 @@ def narrate(data):
 GARMENT = r"\b(?:trench\s*coat|rain\s*coat|over\s*coat|coat|jacket|cardigan|sweater|hoodie|hat|scarf|gloves?|boots?)\b"
 
 
-def art_action_and_wardrobe(scene):
+def art_action_and_wardrobe(scene, prior_wardrobe=""):
     action = scene.get("action", "")
     wardrobe = scene.get("wardrobe", "")
     removal = re.match(r"\s*(?:hangs?\s+(?:up\s+)?|takes?\s+off\s+|removes?\s+|shrugs?\s+off\s+)([^,.]+)", action, re.I)
-    if not removal:
+    if not removal or not isinstance(wardrobe, str):
         return action, wardrobe
 
     def garments(phrase):
@@ -64,8 +77,12 @@ def art_action_and_wardrobe(scene):
     removed = garments(direct_object)
     if not removed:
         return action, wardrobe
-    clauses = re.split(r"\s*(?:,|;|\band\b)\s*", wardrobe)
-    wardrobe = ", ".join(clause for clause in clauses if not removed.intersection(garments(clause)))
+    clauses = re.split(r"\s*(?:,|;|\band\b|\bover\b)\s*", wardrobe)
+    kept = [clause for clause in clauses if not removed.intersection(garments(clause))]
+    if not any(kept) and isinstance(prior_wardrobe, str):
+        previous_layers = re.split(r"\s*(?:,|;|\band\b|\bover\b)\s*", prior_wardrobe)
+        kept = [layer for layer in previous_layers if garments(layer) and not removed.intersection(garments(layer))]
+    wardrobe = ", ".join(filter(None, kept))
     if re.fullmatch(r"\s*hangs?\s+(?:up\s+)?(?:her\s+|the\s+|a\s+)?(?:wet\s+)?(?:trench\s*coat|rain\s*coat|coat|jacket)[.!]?\s*", action, re.I):
         action = action.strip(" .!") + " on a hook"
     return action, wardrobe

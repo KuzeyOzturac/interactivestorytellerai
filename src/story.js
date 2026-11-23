@@ -8,6 +8,8 @@ export const starter = {
     { id: 'theo', name: 'Theo Rusk', appearance: 'Adult man with a salt-and-pepper beard and cropped hair', reference: '' },
   ],
   focus: 'mara',
+  wardrobe: 'Tan raincoat over a burgundy sweater',
+  initialState: { 'item.brass-key.holder': 'On the diner table' },
   action: 'Slides a brass key across the diner table',
 }
 export const openingChoices = ['You ask Mara what happened to the ferry.', 'You examine the brass key.']
@@ -17,8 +19,8 @@ export function createCampaign(world = starter) {
     turns: { opening: {
       id: 'opening', parent: null, input: '', prose: world.opening,
       choices: world === starter ? openingChoices : [],
-      scene: { location: world.location, focus: world.focus, action: world.action, details: '' },
-      facts: [], state: {}, summary: '', image: world === starter ? 'mara.webp' : '',
+      scene: { location: world.location, focus: world.focus, action: world.action, wardrobe: world.wardrobe || '', details: '' },
+      facts: [], state: { ...world.initialState }, summary: '', image: world === starter ? 'mara.webp' : '',
     } },
   }
 }
@@ -68,9 +70,59 @@ export const resultSchema = {
   },
 }
 
+// A declared transfer of an already tracked item updates custody before generation.
+function declaredCustody(state, entry, characters) {
+  const take = /^(?:you |i )?(?:take|pick up) (?:the |a )?([\w -]+?)(?: from [\w -]+)?[.!]?$/i.exec(entry.trim())
+  const give = /^(?:you |i )?(?:give|hand) (?:the |a )?([\w -]+?) to ([\w -]+)[.!]?$/i.exec(entry.trim())
+  const item = (take?.[1] || give?.[1])?.trim().toLowerCase().replace(/ +/g, '-')
+  const key = `item.${item}.holder`
+  if (!item || !Object.hasOwn(state, key)) return {}
+  if (take) return { [key]: 'Player' }
+  const recipient = give[2].trim().toLowerCase()
+  const matches = characters.filter(person => person.id.toLowerCase() === recipient ||
+    person.name.toLowerCase() === recipient || person.name.toLowerCase().split(/ +/)[0] === recipient)
+  return matches.length === 1 ? { [key]: give[2].trim() } : {}
+}
+
+function declaredViewpoint(entry) {
+  const match = /^(?:you |i )?(?:sit (?:down|on the floor) and |kneel and |stand and )?look (up|down) at [\w -]+[.!]?$/i.exec(entry.trim())
+  return match ? (match[1].toLowerCase() === 'up' ? 'low' : 'high') : ''
+}
+
+function declaredDestination(entry) {
+  const move = /^(?:you |i )?(?:go|walk|head|return|take [\w -]+?|bring [\w -]+?) (?:back )?to (?:your|my) (apartment|home|house|room)\b/i.exec(entry.trim())
+  return move?.[1].toLowerCase() || ''
+}
+
+export function contradictsDestination(entry, scene) {
+  const destination = declaredDestination(entry)
+  if (!destination || typeof scene?.location !== 'string') return false
+  return !scene.location.toLowerCase().includes(destination)
+}
+
+function declaredVisibleAction(entry, characters) {
+  for (const sentence of entry.split(/[.!?\n]+/)) {
+    const line = sentence.trim()
+    const lower = line.toLowerCase()
+    for (const character of characters) {
+      for (const name of characterNames(character, characters)) {
+        if (!name || !lower.startsWith(name + ' ')) continue
+        const action = line.slice(name.length + 1)
+        if (/^hangs (?:up )?(?:her |his |their |the |a )?(?:wet )?(?:coat|jacket|raincoat)\b/i.test(action)) {
+          return { focus: character.id, action: action.charAt(0).toUpperCase() + action.slice(1) }
+        }
+      }
+    }
+  }
+  return null
+}
+
 export function requestFor(campaign, input) {
   const turns = history(campaign)
   const current = turns.at(-1)
+  const state = current.state ?? {}
+  const playerStateChanges = declaredCustody(state, input, campaign.world.characters)
+  const destination = declaredDestination(input)
   return {
     format: {
       ...resultSchema,
@@ -87,25 +139,21 @@ export function requestFor(campaign, input) {
     },
     messages: [
       { role: 'system', content: [
-        'The player is the sole protagonist. Address the player as "you". Every named character in the cast is an NPC, including whoever is in the illustration.',
-        'The latest player entry is the next passage of the story, written by the player. The app already prints it verbatim. Continue immediately after it with a new reaction, consequence, or development. Do not quote, paraphrase, or recap the entry as your continuation, and do not assign it to an NPC. Interpret first-person, second-person and subjectless actions as the player’s own.',
-        'Treat events the player states as having happened as established story facts, including actions, dialogue, who is present and changes of location. If the player explicitly writes an attempt or question, continue from the attempt or question. Never choose a new action for the player.',
-        'Example: player entry "You take Mara to your apartment." Continue with "Mara hangs her wet coat by the door." The scene is the player’s apartment, Mara is present, and the player brought her there. Carry those facts forward.',
-        'Use the saved scene and prior player entries for continuity. If generated prose or older memory contradicts a player-authored fact, follow the player entry. Update the rolling summary and durable facts with established changes, including who did what. Write up to three suggested player entries in second person.',
-        'Current state is authoritative over earlier passages and summaries. The newest established player entry can change current state immediately. Use stateChanges for changed, mutable facts such as who holds an object, whether a door is locked, or where someone is. Reuse the same key for the same property, for example item.brass-key.holder. An empty value clears an obsolete property. Leave unchanged properties out.',
-        'Example: current state says item.brass-key.holder = Mara. The player writes "You take the brass key from Mara." Set item.brass-key.holder = Player and continue with Player holding it. If facts contains "Mara has the brass key", include that exact fact in supersededFacts and remove it from facts. Keep historical events in the summary explicitly in the past. Mere attempts, doubts, and dialogue claims do not change state by themselves.',
-        'Relevant memories are historical events from this branch. Current state takes precedence. Use facts for durable context. Omit mutable facts already captured in currentState or stateChanges. Write supersededFacts as exact copies of outdated facts from the supplied facts list.',
-        'Use the player’s current physical location for scene.location. For scene.focus, use the ID of the NPC currently interacting with or accompanying the player. The NPC can be silent or doing something nearby. In the apartment example use "mara". Keep the same NPC across a change of location when they accompany the player. Use "none" when no NPC is with the player. Bystanders stay out of focus.',
-        'For scene.action, write one short visible action for the NPC, such as "Sits on the floor". Choose the main pose or gesture and omit secondary actions, gaze and incidental props. For example: "Reaches up to place a wet coat on a wall hook inside the entryway." Use scene.wardrobe for the NPC’s current visible clothing or state of dress. Use direct visual words, for example "wearing a burgundy sweater" or "naked" when the story says the adult character has nothing on. Explicitly record changes established in the player entry or prose, carry them forward, and do not list clothing handled as a prop as worn. When a character hangs up a coat, the coat belongs in the action and the wardrobe describes what is still on them. Use scene.details for other brief visual cues. Preserve the scene’s established visible details across turns and describe them directly regardless of genre or tone. Preserve the previous visible action when only dialogue changes. If focus is "none", use empty action, wardrobe and details.',
-        'For scene.viewpoint, use the player’s physical view of the NPC: low for looking up, high for looking down, close for moving very near, side for seeing the NPC in profile, eye-level for a normal front view. Retain the previous viewpoint if the player has not moved or changed how they look at the NPC. Use an empty string if there is no meaningful angle or the player is alone. Keep the player out of frame.',
-        'Respond with the requested JSON only. Put only in-world story prose in the prose field. Omit analysis, references to the player’s entry or prior continuation, planning, and commentary about how you interpreted the scene.',
-      ].join(' ') },
+        'Continue interactive fiction. The player is the protagonist, called “you.” All named cast members are NPCs. The latest playerEntry is already in the story. Start with the next event, without quoting, restating, or explaining the entry. An attempt can fail. Never decide a new action for the player.',
+        'Base the turn on the latest entry before older context. If playerDestination is set, the player is already there at the start of your continuation. Keep the player there for this turn. If playerVisibleAction is set, use that established action to frame the image. When someone went with the player, keep them present. Do not move absent characters off-screen or invent where they are.',
+        'Example: entry “You bring the watchmaker to your room.” Prose “He stops by the window and listens.” Location “Your room.” The watchmaker is with you.',
+        'Current state describes the present. playerStateChanges have already happened. Reuse existing state keys. For custody use item.<item-slug>.holder, one key per item. Return only changes, with an empty value to clear a key. Keep past events in the summary and durable facts in plain sentences. Copy obsolete facts into supersededFacts.',
+        'For scene.focus use the present NPC the player is interacting with or accompanying, or none. Write one short visible action and only the clothes the NPC is currently wearing. Carry wardrobe forward unless the latest entry or prose changes it. A coat hung on a hook is a prop. Use scene.details for other cues and scene.viewpoint for the player’s angle: low, high, close, side, eye-level, or empty.',
+        'Return JSON only. Prose is in-world fiction, never analysis or a recap. Give up to three short second-person choices that follow the new event.',
+      ].join('\n') },
       { role: 'user', content: JSON.stringify({
         premise: campaign.world.premise,
         cast: campaign.world.characters.map(({ id, name, appearance }) => ({ id, name, appearance })),
-        summary: current.summary, facts: current.facts, currentState: current.state ?? {}, scene: current.scene,
+        summary: current.summary, facts: current.facts, currentState: { ...state, ...playerStateChanges }, playerStateChanges, scene: current.scene,
         recent: turns.slice(-5).map(({ input, prose }) => ({ playerEntry: input, continuation: isNarratorCommentary(prose) ? '' : prose })),
         relevantMemories: recallMemories(turns, input),
+        playerDestination: destination ? 'Your ' + destination : '',
+        playerVisibleAction: declaredVisibleAction(input, campaign.world.characters),
         playerEntry: input,
       }) },
     ],
@@ -165,11 +213,23 @@ export function addTurn(campaign, id, input, result) {
   const prose = checkedText(result.prose, 5000)
   if (!prose) throw new Error('The narrator returned an empty passage. Try again.')
   if (isNarratorCommentary(prose)) throw new Error('The narrator returned commentary instead of story prose. Try the turn again.')
+  if (contradictsDestination(input, result.scene)) throw new Error('The narrator lost track of where you went. Try the turn again.')
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
+  const custody = declaredCustody(previous.state ?? {}, input, campaign.world.characters)
+  const state = { ...updateState(previous.state, result.stateChanges), ...custody }
+  for (const [key, holder] of Object.entries(state)) {
+    const item = /^item\.([a-z0-9-]+)\.holder$/.exec(key)?.[1]
+    if (!item || typeof holder !== 'string' || holder.toLowerCase() !== 'player') continue
+    const lastWord = item.split('-').at(-1)
+    if (/^(holds?|grips?|clutches?|pockets?|carries|catches|takes?|tightens)\b/i.test(scene.action) &&
+        scene.action.toLowerCase().split(/[^\p{L}\p{N}]+/u).includes(lastWord)) {
+      scene.action = ''
+    }
+  }
   if (scene.focus && scene.focus !== 'none') {
     const viewpoint = result.scene.viewpoint ?? (scene.focus === previous.scene.focus ? previous.scene.viewpoint : '')
-    scene.viewpoint = Object.hasOwn(cameraAngles, viewpoint) ? viewpoint : ''
+    scene.viewpoint = declaredViewpoint(input) || (Object.hasOwn(cameraAngles, viewpoint) ? viewpoint : '')
     scene.wardrobe = checkedText(result.scene.wardrobe ?? (scene.focus === previous.scene.focus ? previous.scene.wardrobe : '') ?? '', 150)
   }
   const normalizeFact = fact => fact.toLowerCase().replace(/[.!?]+$/, '')
@@ -177,8 +237,9 @@ export function addTurn(campaign, id, input, result) {
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
     summary: checkedText(result.summary, 2200),
-    facts: checkedList(result.facts, 20).filter(fact => !superseded.has(normalizeFact(fact))),
-    state: updateState(previous.state, result.stateChanges),
+    facts: checkedList(result.facts, 20).filter(fact =>
+      !/^[\w-]+(?:\.[\w-]+)+\s*[:=]/.test(fact) && !superseded.has(normalizeFact(fact))),
+    state,
     imageStyle: previous.imageStyle,
     image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artRevision || campaign.world.artStyle || '') ? previous.image : '',
   }

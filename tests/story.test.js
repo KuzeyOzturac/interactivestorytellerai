@@ -67,7 +67,7 @@ test('the exact player narration and resulting scene carry into the next turn', 
   assert.deepEqual(context.recent.at(-1), { playerEntry: entry, continuation: 'Mara hangs her wet coat by the door.' })
   assert.equal(context.scene.location, 'Your apartment')
   assert.equal(context.scene.focus, 'mara')
-  assert.match(request.messages[0].content, /Continue immediately after it/)
+  assert.match(request.messages[0].content, /Start with the next event/)
 })
 
 test('a saved apartment turn recovers Mara, and an explicitly solo turn stays solo', () => {
@@ -113,7 +113,7 @@ test('automatic art uses a short action and the same style across a world', () =
 test('a change in player viewpoint triggers fresh art for the same character and action', () => {
   const start = createCampaign()
   const fromFloor = addTurn(start, 'floor', 'You sit on the floor and look up at Mara.', result(start, {
-    scene: { ...start.turns.opening.scene, viewpoint: 'low' },
+    scene: { ...start.turns.opening.scene, viewpoint: 'eye-level' },
   }))
   const turn = fromFloor.turns.floor
   assert.equal(turn.image, '')
@@ -150,4 +150,35 @@ test('older relevant events are recalled only from the active branch', () => {
   const request = campaign => JSON.parse(requestFor(campaign, 'You ask about the ferry.').messages[1].content)
   assert.match(request(branch).relevantMemories[0].playerEntry, /promise/)
   assert.deepEqual(request({ ...branch, active: 'opening' }).relevantMemories, [])
+})
+
+test('a declared tracked-item transfer is authoritative even if the model disagrees', () => {
+  const start = createCampaign()
+  const entry = 'You take the brass key from Mara.'
+  const context = JSON.parse(requestFor(start, entry).messages[1].content)
+  assert.equal(context.currentState['item.brass-key.holder'], 'Player')
+  const next = addTurn(start, 'take', entry, result(start, {
+    stateChanges: [{ key: 'item.brass-key.holder', value: 'Mara' }],
+    scene: { ...start.turns.opening.scene, action: 'Holds the brass key in her palm' },
+  }))
+  assert.equal(next.turns.take.scene.action, '')
+  assert.equal(next.turns.take.state['item.brass-key.holder'], 'Player')
+  const later = addTurn(next, 'later', 'You look up at Mara.', result(next, {
+    scene: { ...start.turns.opening.scene, action: 'Holds the brass key in her palm' },
+  }))
+  assert.equal(later.turns.later.scene.action, '')
+  const attempt = JSON.parse(requestFor(start, 'You try to take the brass key.').messages[1].content)
+  assert.deepEqual(attempt.playerStateChanges, {})
+})
+
+test('an established move to the apartment cannot be saved as an unrelated location', () => {
+  const start = createCampaign()
+  const entry = 'You take Mara to your apartment. Mara hangs her coat.'
+  const input = JSON.parse(requestFor(start, entry).messages[1].content)
+  assert.equal(input.playerDestination, 'Your apartment')
+  assert.deepEqual(input.playerVisibleAction, { focus: 'mara', action: 'Hangs her coat' })
+  assert.throws(() => addTurn(start, 'wrong-place', entry, result(start)), /lost track/)
+  assert.doesNotThrow(() => addTurn(start, 'right-place', entry, result(start, {
+    scene: { ...start.turns.opening.scene, location: "Player's apartment hallway" },
+  })))
 })
