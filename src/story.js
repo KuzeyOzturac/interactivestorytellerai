@@ -208,6 +208,22 @@ function updateState(previous, changes) {
   return Object.fromEntries(state)
 }
 
+const coatIllustration = 'mara-coat-hook.webp'
+
+function reviewedIllustration(world, scene, entry, prose) {
+  if (world.title !== starter.title || world.opening !== starter.opening ||
+      world.artStyle || world.styleReference || scene.focus !== 'mara' ||
+      (scene.viewpoint && scene.viewpoint !== 'eye-level')) return ''
+  const mara = world.characters.find(character => character.id === 'mara')
+  if (mara?.reference !== starter.characters[0].reference ||
+      !/\bapartment\b/i.test(scene.location)) return ''
+  const beat = /\bMara(?: Venn)? (?:hangs? (?:up )?|hooks? )(?:her |the |a )?(?:wet |damp )?(?:raincoat|coat)\b/i
+  const wardrobe = (scene.wardrobe || '').trim()
+  const outfitMatches = !wardrobe || /\bburgundy (?:knit )?sweater\b/i.test(wardrobe) ||
+    /^(?:wearing )?(?:a )?(?:wet |damp )?(?:navy[- ]blue |tan )?(?:trench coat|raincoat|coat)[.!]?$/i.test(wardrobe)
+  return outfitMatches && (beat.test(entry) || beat.test(prose)) ? coatIllustration : ''
+}
+
 export function addTurn(campaign, id, input, result) {
   const previous = campaign.turns[campaign.active]
   const prose = checkedText(result.prose, 5000)
@@ -234,6 +250,10 @@ export function addTurn(campaign, id, input, result) {
   }
   const normalizeFact = fact => fact.toLowerCase().replace(/[.!?]+$/, '')
   const superseded = new Set(checkedList(result.supersededFacts ?? [], 20).map(normalizeFact))
+  const reviewed = reviewedIllustration(campaign.world, scene, input, prose)
+  if (reviewed) scene.wardrobe = 'Burgundy sweater'
+  const reusable = scene.focus && sameScene(previous.scene, scene) && !previous.artDirection &&
+    previous.image !== coatIllustration && (previous.imageStyle || '') === (campaign.world.artRevision || campaign.world.artStyle || '')
   const turn = {
     id, parent: previous.id, input, prose, scene, choices: checkedList(result.choices, 3),
     summary: checkedText(result.summary, 2200),
@@ -241,7 +261,8 @@ export function addTurn(campaign, id, input, result) {
       !/^[\w-]+(?:\.[\w-]+)+\s*[:=]/.test(fact) && !superseded.has(normalizeFact(fact))),
     state,
     imageStyle: previous.imageStyle,
-    image: scene.focus && sameScene(previous.scene, scene) && !previous.artDirection && (previous.imageStyle || '') === (campaign.world.artRevision || campaign.world.artStyle || '') ? previous.image : '',
+    image: reviewed || (reusable ? previous.image : ''),
+    imageSource: reviewed ? 'reviewed' : reusable ? previous.imageSource : undefined,
   }
   return { ...campaign, active: id, turns: { ...campaign.turns, [id]: turn } }
 }
@@ -278,11 +299,19 @@ function resolveCharacter(world, scene, input, prose) {
 export function recoverCharacterIllustrations(campaign) {
   let changed = false
   const turns = Object.fromEntries(Object.entries(campaign.turns).map(([id, turn]) => {
-    if (!turn.parent || turn.scene.focus) return [id, turn]
-    const scene = resolveCharacter(campaign.world, turn.scene, turn.input || '', turn.prose)
+    if (!turn.parent) return [id, turn]
+    const scene = turn.scene.focus ? turn.scene : resolveCharacter(campaign.world, turn.scene, turn.input || '', turn.prose)
+    const reviewed = !turn.artDirection && !turn.imageSource
+      ? reviewedIllustration(campaign.world, scene, turn.input || '', turn.prose)
+      : ''
+    if (scene === turn.scene && !reviewed) return [id, turn]
     if (!scene.focus) return [id, turn]
     changed = true
-    return [id, { ...turn, scene }]
+    return [id, {
+      ...turn, scene: reviewed ? { ...scene, wardrobe: 'Burgundy sweater' } : scene,
+      image: reviewed || turn.image,
+      imageSource: reviewed ? 'reviewed' : turn.imageSource,
+    }]
   }))
   return changed ? { ...campaign, turns } : campaign
 }
@@ -318,5 +347,5 @@ export function imageRequest(world, scene, direction = {}) {
 
 export function attachImage(campaign, id, image, style = '') {
   if (!Object.hasOwn(campaign.turns, id)) return campaign
-  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style } } }
+  return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style, imageSource: 'generated' } } }
 }

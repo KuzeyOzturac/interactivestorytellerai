@@ -71,7 +71,7 @@ function App() {
         const recovered = recoverCharacterIllustrations({ ...saved, id: saved.id || crypto.randomUUID() })
         current.current = recovered
         setCampaign(recovered)
-        if (autoArt && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
+        if (autoArt && !recovered.turns[recovered.active].image && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
           void renderArt(recovered)
         }
       }

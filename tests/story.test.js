@@ -182,3 +182,17 @@ test('an established move to the apartment cannot be saved as an unrelated locat
     scene: { ...start.turns.opening.scene, location: "Player's apartment hallway" },
   })))
 })
+
+test('the reviewed coat frame replaces a legacy render only for the matching starter beat', () => {
+  const start = createCampaign()
+  const proposed = result(start, {
+    prose: 'Mara hangs her wet coat by the door.',
+    scene: { focus: 'mara', location: 'Your apartment', action: 'Hangs wet coat', details: '', wardrobe: 'Wearing a navy-blue trench coat' },
+  })
+  const campaign = addTurn(start, 'coat', 'You take her to your apartment.', proposed)
+  assert.equal(campaign.turns.coat.image, 'mara-coat-hook.webp')
+  const legacy = { ...campaign, turns: { ...campaign.turns, coat: { ...campaign.turns.coat, image: 'bad.webp', imageSource: undefined } } }
+  assert.equal(recoverCharacterIllustrations(legacy).turns.coat.image, 'mara-coat-hook.webp')
+  assert.equal(recoverCharacterIllustrations({ ...legacy, world: { ...legacy.world, artStyle: 'watercolor' } }).turns.coat.image, 'bad.webp')
+  assert.equal(recoverCharacterIllustrations(attachImage(legacy, 'coat', 'custom.webp')).turns.coat.image, 'custom.webp')
+})

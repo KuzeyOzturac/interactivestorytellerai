@@ -84,23 +84,25 @@ test('playing ahead keeps an earlier scene render attached to its own turn', asy
   await expect(page.getByRole('img', { name: /Theo Rusk.*Hoists/ })).toBeVisible()
 })
 
-test('a named companion still gets a character illustration when the model omits focus', async ({ page }) => {
+test('the apartment beat displays the reviewed image, with no render request', async ({ page }) => {
+  let renders = 0
   await page.route('**/api/turn', route => route.fulfill({ json: {
     ...generated, prose: 'Mara hangs her wet coat by the door.',
-    scene: { focus: '', location: 'Your apartment', action: '', details: '' },
+    scene: { focus: '', location: 'Your apartment', action: '', details: '', wardrobe: 'Wearing a navy-blue trench coat' },
   } }))
   await page.route('**/api/image', async route => {
-    const request = route.request().postDataJSON()
-    expect(request.reference).toBe('mara.webp')
-    expect(request.scene.location).toBe('Your apartment')
-    expect(request.scene.action).toContain('hangs her wet coat')
+    renders++
     await route.fulfill({ json: { image } })
   })
   await page.goto('/')
-  await expect(page.getByRole('heading', { name: 'Character illustration' })).toBeVisible()
   await page.getByLabel('Your move').fill('You take Mara to your apartment.')
   await page.getByRole('button', { name: 'Continue' }).click()
-  await expect(page.getByRole('img', { name: /Mara Venn.*hangs/ })).toBeVisible()
+  const illustration = page.getByRole('img', { name: /Mara Venn.*hangs/ })
+  await expect(illustration).toHaveAttribute('src', /mara-coat-hook\.webp$/)
+  await expect.poll(() => illustration.evaluate(image => image.complete && image.naturalWidth > 0)).toBe(true)
+  expect(renders).toBe(0)
+  await page.reload()
+  await expect(illustration).toHaveAttribute('src', /mara-coat-hook\.webp$/)
 })
 
 test('an echoed player entry is retried and only new narration is saved', async ({ page }) => {
