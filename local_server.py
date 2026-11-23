@@ -29,7 +29,7 @@ OBSERVATION_FORMAT = {
     "required": ["people", "appearance", "wearing", "action", "objects", "setting", "viewpoint"],
     "properties": {
         "people": {"type": "integer"},
-        **{key: {"type": "string"} for key in ("appearance", "wearing", "action", "objects", "setting", "viewpoint")},
+        **{key: {"type": "string", "maxLength": 100} for key in ("appearance", "wearing", "action", "objects", "setting", "viewpoint")},
     },
 }
 VISION_MODEL = os.environ.get("NIGHTDRAFT_VISION_MODEL", "").strip()
@@ -334,10 +334,10 @@ def review_image(data, rendered):
             "Describe only what is visibly drawn. Count people. Separately describe clothes actually "
             "worn on bodies, the person's posture and hand action, objects and where they are, "
             "setting, and view angle. Distinguish clothing being worn from clothing held or hanging."
-            " Use empty strings when unclear. Return JSON."
+            " Use short phrases of six words or fewer. Use empty strings when unclear. Return JSON."
         ),
         "images": [base64.b64encode(jpg.getvalue()).decode()],
-    }], OBSERVATION_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 220})
+    }], OBSERVATION_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 320})
     return compare_image_observation(data, observation)
 
 
