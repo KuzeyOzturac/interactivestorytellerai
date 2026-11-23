@@ -241,12 +241,13 @@ test('dynamic cast and story state are branch-specific while portraits keep thei
   assert.deepEqual(context.cast.map(person => person.id), ['nia', 'sam'])
 
   const changed = saveDynamicTurn(start, 'next', action, {
-    ...initial, prose: 'Nia points to the map. Sam goes below deck.',
+    ...initial, prose: action + ' Nia points to the map. Sam goes below deck.',
     characters: [{ id: 'nia-cole', name: 'Nia Cole', appearance: '', context: 'Showed the player the route.' }],
     scene: { location: 'Bridge', present: ['nia-cole', 'nia', 'unknown'] },
     facts: [], supersededFacts: ['Nia carries the compass.'],
   })
   const next = changed.turns.next
+  assert.equal(next.prose, 'Nia points to the map. Sam goes below deck.')
   assert.deepEqual(next.scene.present, ['nia'])
   assert.equal(next.cast.nia.portraitId, start.turns.opening.cast.nia.portraitId)
   assert.equal(next.cast.nia.context, 'Showed the player the route.')

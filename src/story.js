@@ -397,7 +397,7 @@ export function dynamicRequest(campaign, entry, opening = false) {
       { role: 'system', content: [
         'Write the next passage of interactive fiction. The player is the protagonist. Preserve the opening and player entries as canon. Continue with the next event, never echo or explain the entry and never decide a new action for the player.',
         opening ? 'Give the story a short title. Establish the scene directly after the supplied opening.' : 'Continue from the latest player entry. Keep established continuity.',
-        'List important non-player characters only. Return characters for new introductions or changes only. Give each new character a distinct short lowercase ID, name, and concise stable visual features for a solo portrait. Omit temporary expressions, poses, and scenery. Reuse existing IDs. Context is the updated current role, knowledge, goals and relationship with the player, replacing obsolete information. Record only what the story has established. For existing characters, use empty strings for unchanged fields.',
+        'List important non-player characters only. Return characters for new introductions or changes only. Give each new character a distinct short lowercase ID, name, and concise stable visual features for a solo portrait. Omit temporary expressions, poses, and scenery. Reuse existing IDs. Context is the updated current role, knowledge, goals and relationship with the player, replacing obsolete information. Update context whenever a character changes plans, leaves, learns something, or when prior context has become obsolete. Record only what the story has established. For existing characters, use empty strings for unchanged fields.',
         'scene.present is the full list of IDs of important characters physically present at the end of your passage. Include still-present characters and those introduced in the player entry. Exclude the player, departed characters, distant speakers, and people only mentioned. Empty list when the player is alone.',
         'Summarize only events established in the opening, entries, or narrated passages. Facts must be established and worth remembering. Track important objects and their current holders using item.<item-slug>.holder. Return only keyed stateChanges, using existing keys and an empty value to remove a key. PlayerStateChanges are authoritative. List obsolete facts in supersededFacts. Supply up to three short actions the player could choose.',
         'Return JSON only, with fiction in prose and no reasoning.',
@@ -415,7 +415,12 @@ export function dynamicRequest(campaign, entry, opening = false) {
 
 export function saveDynamicTurn(campaign, id, entry, result) {
   const previous = campaign?.turns[campaign.active]
-  const prose = checkedText(result.prose, 5000)
+  let prose = checkedText(result.prose, 5000)
+  for (const sentence of entry.match(/[^.!?]+[.!?]+/g) || []) {
+    const leading = /^[^.!?]+[.!?]+/.exec(prose)?.[0]
+    if (!leading || !repeatsPlayerEntry(sentence, leading.replace(/\b(\w+)[\s:,]+\1\b/gi, '$1'))) break
+    prose = prose.slice(leading.length).trimStart()
+  }
   if (!prose || isNarratorCommentary(prose) || repeatsPlayerEntry(entry, prose)) {
     throw new Error('The narrator did not continue the story. Try again.')
   }
