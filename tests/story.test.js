@@ -79,7 +79,7 @@ test('a saved apartment turn recovers Mara, and an explicitly solo turn stays so
   apartment.turns.apartment.scene.focus = ''
   const recovered = recoverCharacterIllustrations(apartment)
   assert.equal(recovered.turns.apartment.scene.focus, 'mara')
-  assert.match(recovered.turns.apartment.scene.action, /hangs her wet coat/)
+  assert.match(recovered.turns.apartment.scene.action, /hangs her wet coat/i)
   const solo = addTurn(recovered, 'solo', 'You leave Mara behind and walk home alone.', result(recovered, {
     prose: 'Mara waves goodbye.',
     scene: { location: 'Outside', focus: 'none', action: '', details: '' },
@@ -195,4 +195,20 @@ test('the reviewed coat frame replaces a legacy render only for the matching sta
   assert.equal(recoverCharacterIllustrations(legacy).turns.coat.image, 'mara-coat-hook.webp')
   assert.equal(recoverCharacterIllustrations({ ...legacy, world: { ...legacy.world, artStyle: 'watercolor' } }).turns.coat.image, 'bad.webp')
   assert.equal(recoverCharacterIllustrations(attachImage(legacy, 'coat', 'custom.webp')).turns.coat.image, 'custom.webp')
+})
+
+test('explicit NPC actions and their props survive across unrelated custom worlds', () => {
+  for (const [title, name, location, action] of [
+    ['Clockwork Dawn', 'Imani', 'Clock workshop', 'Sits on a wooden stool'],
+    ['Glasshouse Dusk', 'Emil', 'Greenhouse', 'Waters the fern with a yellow watering can'],
+  ]) {
+    const start = createCampaign({ title, premise: '', opening: '', location, focus: 'npc',
+      action: '', characters: [{ id: 'npc', name, appearance: '', reference: '' }] })
+    const entry = `You approach ${name}. ${name} ${action.charAt(0).toLowerCase() + action.slice(1)}.`
+    const next = addTurn(start, 'new', entry, result(start, {
+      scene: { ...start.turns.opening.scene, action: 'Glances toward you' },
+    }))
+    assert.equal(next.turns.new.image, '')
+    assert.equal(imageRequest(start.world, next.turns.new.scene).scene.action, action)
+  }
 })

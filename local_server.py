@@ -50,8 +50,8 @@ def narrate(data):
         previous = context.get("scene", {}) if isinstance(context, dict) else {}
         if isinstance(scene, dict) and isinstance(previous, dict) and isinstance(scene.get("action"), str):
             declared = context.get("playerVisibleAction")
-            if isinstance(declared, dict) and isinstance(declared.get("action"), str):
-                scene.update(action=declared["action"], focus=declared["focus"])
+            if isinstance(declared, dict) and isinstance(declared.get("action"), str) and scene.get("focus") == declared.get("focus"):
+                scene["action"] = declared["action"]
             prior_wardrobe = previous.get("wardrobe", "") if scene.get("focus") == previous.get("focus") else ""
             scene["action"], scene["wardrobe"] = art_action_and_wardrobe(scene, prior_wardrobe)
         return turn

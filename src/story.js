@@ -100,15 +100,20 @@ export function contradictsDestination(entry, scene) {
   return !scene.location.toLowerCase().includes(destination)
 }
 
+const nonVisualVerbs = new Set(['is', 'was', 'has', 'does', 'seems', 'wants', 'thinks', 'knows', 'remembers',
+  'hopes', 'believes', 'plans', 'tries', 'says', 'asks', 'answers', 'replies', 'tells', 'mentions'])
+
 function declaredVisibleAction(entry, characters) {
-  for (const sentence of entry.split(/[.!?\n]+/)) {
-    const line = sentence.trim()
+  for (const sentence of entry.match(/[^.!?\n]+[.!?]?/g) || []) {
+    const line = sentence.trim().replace(/[.!]$/, '')
+    if (line.endsWith('?')) continue
     const lower = line.toLowerCase()
     for (const character of characters) {
       for (const name of characterNames(character, characters)) {
         if (!name || !lower.startsWith(name + ' ')) continue
         const action = line.slice(name.length + 1)
-        if (/^hangs (?:up )?(?:her |his |their |the |a )?(?:wet )?(?:coat|jacket|raincoat)\b/i.test(action)) {
+        const verb = /^[a-z]+s\b/i.exec(action)?.[0].toLowerCase()
+        if (verb && !nonVisualVerbs.has(verb)) {
           return { focus: character.id, action: action.charAt(0).toUpperCase() + action.slice(1) }
         }
       }
@@ -143,7 +148,7 @@ export function requestFor(campaign, input) {
         'Base the turn on the latest entry before older context. If playerDestination is set, the player is already there at the start of your continuation. Keep the player there for this turn. If playerVisibleAction is set, use that established action to frame the image. When someone went with the player, keep them present. Do not move absent characters off-screen or invent where they are.',
         'Example: entry “You bring the watchmaker to your room.” Prose “He stops by the window and listens.” Location “Your room.” The watchmaker is with you.',
         'Current state describes the present. playerStateChanges have already happened. Reuse existing state keys. For custody use item.<item-slug>.holder, one key per item. Return only changes, with an empty value to clear a key. Keep past events in the summary and durable facts in plain sentences. Copy obsolete facts into supersededFacts.',
-        'For scene.focus use the present NPC the player is interacting with or accompanying, or none. Write one short visible action and only the clothes the NPC is currently wearing. Carry wardrobe forward unless the latest entry or prose changes it. A coat hung on a hook is a prop. Use scene.details for other cues and scene.viewpoint for the player’s angle: low, high, close, side, eye-level, or empty.',
+        'For scene.focus use the present NPC the player is interacting with or accompanying, or none. Write one short visible action, retaining the main object or surface needed to depict it, and only the clothes the NPC is currently wearing. Carry wardrobe forward unless the latest entry or prose changes it. A coat hung on a hook is a prop. Use scene.details for other cues and scene.viewpoint for the player’s angle: low, high, close, side, eye-level, or empty.',
         'Return JSON only. Prose is in-world fiction, never analysis or a recap. Give up to three short second-person choices that follow the new event.',
       ].join('\n') },
       { role: 'user', content: JSON.stringify({
@@ -232,6 +237,10 @@ export function addTurn(campaign, id, input, result) {
   if (contradictsDestination(input, result.scene)) throw new Error('The narrator lost track of where you went. Try the turn again.')
   const rawScene = Object.fromEntries(['location', 'focus', 'action', 'details'].map(key => [key, checkedText(result.scene?.[key], 300)]))
   const scene = resolveCharacter(campaign.world, rawScene, input, prose)
+  const declared = declaredVisibleAction(input, campaign.world.characters)
+  const illustrated = declared?.focus === scene.focus ? declared :
+    !scene.action.trim().includes(' ') ? declaredVisibleAction(prose, campaign.world.characters) : null
+  if (illustrated?.focus === scene.focus) scene.action = illustrated.action
   const custody = declaredCustody(previous.state ?? {}, input, campaign.world.characters)
   const state = { ...updateState(previous.state, result.stateChanges), ...custody }
   for (const [key, holder] of Object.entries(state)) {
