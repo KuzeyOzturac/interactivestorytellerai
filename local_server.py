@@ -3,6 +3,7 @@ import base64
 import io
 import json
 import os
+import re
 import threading
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
@@ -45,6 +46,31 @@ def narrate(data):
         raise RuntimeError("The local model returned an incomplete turn. Try again.") from error
 
 
+GARMENT = r"\b(?:trench\s*coat|rain\s*coat|over\s*coat|coat|jacket|cardigan|sweater|hoodie|hat|scarf|gloves?|boots?)\b"
+
+
+def art_action_and_wardrobe(scene):
+    action = scene.get("action", "")
+    wardrobe = scene.get("wardrobe", "")
+    removal = re.match(r"\s*(?:hangs?\s+(?:up\s+)?|takes?\s+off\s+|removes?\s+|shrugs?\s+off\s+)([^,.]+)", action, re.I)
+    if not removal:
+        return action, wardrobe
+
+    def garments(phrase):
+        return {re.sub(r"(?:trench|rain|over)\s*coat", "coat", item.lower()).rstrip("s")
+                for item in re.findall(GARMENT, phrase, re.I)}
+
+    direct_object = re.split(r"\b(?:on|onto|by|beside|near|over|from)\b", removal.group(1), maxsplit=1, flags=re.I)[0]
+    removed = garments(direct_object)
+    if not removed:
+        return action, wardrobe
+    clauses = re.split(r"\s*(?:,|;|\band\b)\s*", wardrobe)
+    wardrobe = ", ".join(clause for clause in clauses if not removed.intersection(garments(clause)))
+    if re.fullmatch(r"\s*hangs?\s+(?:up\s+)?(?:her\s+|the\s+|a\s+)?(?:wet\s+)?(?:trench\s*coat|rain\s*coat|coat|jacket)[.!]?\s*", action, re.I):
+        action = action.strip(" .!") + " on a hook"
+    return action, wardrobe
+
+
 def scene_prompt(scene, tokenizers, exact_prompt=""):
     pieces = []
 
@@ -62,12 +88,12 @@ def scene_prompt(scene, tokenizers, exact_prompt=""):
         if phrase and fits(", ".join([*pieces, phrase])):
             pieces.append(phrase)
 
-    wardrobe = scene.get("wardrobe", "")
+    action, wardrobe = art_action_and_wardrobe(scene)
     if wardrobe.strip().lower().rstrip(".") in {"undressed adult", "unclothed adult", "naked adult"}:
         wardrobe = "Naked"
     add(wardrobe)
-    for field in ("action", "location"):
-        add(scene.get(field, ""))
+    add(action)
+    add(scene.get("location", ""))
 
     add({
         "low": "low-angle view",

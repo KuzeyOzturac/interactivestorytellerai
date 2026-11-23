@@ -79,6 +79,14 @@ class ScenePromptTest(unittest.TestCase):
             self.assertLessEqual(len(tokenizer(prompt).input_ids), tokenizer.model_max_length)
 
 
+    def test_hanging_a_coat_drops_only_conflicting_wardrobe(self):
+        scene = {"action": "Hangs wet coat", "wardrobe": "Wearing a navy-blue trench coat and a burgundy sweater"}
+        action, wardrobe = local_server.art_action_and_wardrobe(scene)
+        self.assertEqual(action, "Hangs wet coat on a hook")
+        self.assertEqual(wardrobe, "a burgundy sweater")
+        scene["action"] = "Sits on the floor"
+        self.assertEqual(local_server.art_action_and_wardrobe(scene), (scene["action"], scene["wardrobe"]))
+
     def test_unweighted_comparison_uses_the_same_negative_groups(self):
         result = local_server.negative_conditioning(None, weighted=False)
         self.assertIn("collage", result["negative_prompt"])
