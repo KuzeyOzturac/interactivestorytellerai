@@ -6,3 +6,26 @@
 
 .art-direction { margin-top: .65rem; border-top: 1px solid var(--border); }
 .art-direction summary { cursor: pointer; padding: .65rem 0; color: var(--accent); min-height: 44px; }
+
+.start-screen, .dynamic-room { width: min(100%, 56rem); margin-inline: auto; }
+.start-screen { padding: clamp(2rem, 8vw, 6rem) 1.25rem; }
+.start-screen > p { color: var(--muted); }
+.dynamic-room { display: block; padding-inline: clamp(1rem, 4vw, 2rem); }
+.dynamic-room .transcript { max-width: none; }
+.opening-form textarea { min-height: 9rem; }
+.cast { margin-bottom: 1.6rem; }
+.cast h2 { font: 600 .85rem 'DM Sans', sans-serif; color: var(--muted); margin-bottom: .65rem; }
+.cast ul { display: flex; gap: .65rem; list-style: none; padding: .3rem; margin: -.3rem; overflow-x: auto; scrollbar-color: #656350 transparent; }
+.cast li { flex: 0 0 clamp(6rem, 18vw, 8rem); min-width: 0; }
+.character-card { background: var(--paper); border: 1px solid var(--border); border-radius: 8px; }
+.character-card summary { display: block; list-style: none; cursor: pointer; border-radius: 8px; }
+.character-card summary::-webkit-details-marker { display: none; }
+.character-card img, .portrait-placeholder { width: 100%; aspect-ratio: 4/5; object-fit: cover; border-radius: 7px 7px 0 0; display: block; }
+.portrait-placeholder { display: flex; flex-direction: column; gap: .35rem; align-items: center; justify-content: center; color: var(--muted); background: #272d26; text-align: center; }
+.character-name { display: block; padding: .5rem; text-align: center; font-size: .88rem; overflow-wrap: anywhere; }
+.character-details { padding: .65rem; font-size: .8rem; overflow-wrap: anywhere; border-top: 1px solid var(--border); }
+.character-details button { font-size: .75rem; min-height: 36px; padding: .3rem; width: 100%; }
+.character-details p:last-of-type { margin-bottom: .55rem; }
+dialog > .portrait-setting { display: flex; align-items: center; }
+.journal-character { border-top: 1px solid var(--border); padding: .55rem 0; }
+.journal-character summary { cursor: pointer; }

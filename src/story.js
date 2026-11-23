@@ -367,3 +367,115 @@ export function attachImage(campaign, id, image, style = '', reviewed = false) {
   if (!Object.hasOwn(campaign.turns, id)) return campaign
   return { ...campaign, turns: { ...campaign.turns, [id]: { ...campaign.turns[id], image, imageStyle: style, imageSource: 'generated', imageReviewed: reviewed } } }
 }
+
+const characterUpdate = {
+  type: 'object',
+  required: ['id', 'name', 'appearance', 'context'],
+  properties: {
+    id: { type: 'string' }, name: { type: 'string' },
+    appearance: { type: 'string' }, context: { type: 'string' },
+  },
+}
+
+export function dynamicRequest(campaign, entry, opening = false) {
+  const turns = campaign ? history(campaign) : []
+  const turn = turns.at(-1)
+  const currentState = turn?.state || {}
+  const cast = Object.values(turn?.cast || {}).map(({ id, name, appearance, context }) => ({ id, name, appearance, context }))
+  const playerStateChanges = opening ? {} : declaredCustody(currentState, entry, cast)
+  const properties = {
+    ...resultSchema.properties,
+    scene: { type: 'object', required: ['location', 'present'], properties: {
+      location: { type: 'string' }, present: { type: 'array', items: { type: 'string' } },
+    } },
+    characters: { type: 'array', items: characterUpdate },
+    ...(opening ? { title: { type: 'string' } } : {}),
+  }
+  return {
+    format: { type: 'object', properties, required: Object.keys(properties) },
+    messages: [
+      { role: 'system', content: [
+        'Write the next passage of interactive fiction. The player is the protagonist. Preserve the opening and player entries as canon. Continue with the next event, never echo or explain the entry and never decide a new action for the player.',
+        opening ? 'Give the story a short title. Establish the scene directly after the supplied opening.' : 'Continue from the latest player entry. Keep established continuity.',
+        'List important non-player characters only. Return characters for new introductions or changes only. Give each new character a distinct short lowercase ID, name, and concise stable visual features for a solo portrait. Omit temporary expressions, poses, and scenery. Reuse existing IDs. Context is the updated current role, knowledge, goals and relationship with the player, replacing obsolete information. Record only what the story has established. For existing characters, use empty strings for unchanged fields.',
+        'scene.present is the full list of IDs of important characters physically present at the end of your passage. Include still-present characters and those introduced in the player entry. Exclude the player, departed characters, distant speakers, and people only mentioned. Empty list when the player is alone.',
+        'Summarize only events established in the opening, entries, or narrated passages. Facts must be established and worth remembering. Track important objects and their current holders using item.<item-slug>.holder. Return only keyed stateChanges, using existing keys and an empty value to remove a key. PlayerStateChanges are authoritative. List obsolete facts in supersededFacts. Supply up to three short actions the player could choose.',
+        'Return JSON only, with fiction in prose and no reasoning.',
+      ].join('\n') },
+      { role: 'user', content: JSON.stringify({
+        ...(opening ? { opening: entry } : { playerEntry: entry }),
+        cast, scene: turn?.scene, summary: turn?.summary, facts: turn?.facts,
+        currentState: { ...currentState, ...playerStateChanges }, playerStateChanges,
+        recent: turns.slice(-5).map(({ input, prose }) => ({ entry: input, continuation: prose })),
+        relevantMemories: recallMemories(turns, entry),
+      }) },
+    ],
+  }
+}
+
+export function saveDynamicTurn(campaign, id, entry, result) {
+  const previous = campaign?.turns[campaign.active]
+  const prose = checkedText(result.prose, 5000)
+  if (!prose || isNarratorCommentary(prose) || repeatsPlayerEntry(entry, prose)) {
+    throw new Error('The narrator did not continue the story. Try again.')
+  }
+  if (!Array.isArray(result.characters) || !Array.isArray(result.scene?.present)) {
+    throw new Error('The narrator returned an incomplete cast. Try again.')
+  }
+  const cast = new Map(Object.entries(previous?.cast || {}))
+  const aliases = new Map()
+  const characterKey = value => checkedText(value, 100).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-|-$/g, '')
+  for (const update of result.characters.slice(0, 30)) {
+    const key = characterKey(update.id)
+    if (!key || key === 'player' || key === 'none') continue
+    const name = checkedText(update.name ?? '', 100)
+    const old = cast.get(key) ?? [...cast.values()].find(person => name && characterKey(person.name) === characterKey(name))
+    if (!old && !name) continue
+    const characterId = old?.id ?? key
+    aliases.set(key, characterId)
+    cast.set(characterId, {
+      id: characterId,
+      portraitId: old?.portraitId ?? crypto.randomUUID(),
+      name: name || old?.name,
+      appearance: checkedText(update.appearance ?? '', 180) || old?.appearance || '',
+      context: checkedText(update.context ?? '', 600) || old?.context || '',
+    })
+  }
+  const present = [...new Set(result.scene.present.map(value => {
+    const key = characterKey(value)
+    return aliases.get(key) || key
+  }))].filter(key => cast.has(key))
+  const state = updateState(previous?.state, result.stateChanges)
+  const custody = declaredCustody(previous?.state ?? {}, entry, [...cast.values()])
+  Object.assign(state, custody)
+  for (const key of Object.keys(custody)) delete state[key.replace(/\.holder$/, '.location')]
+  const factKey = fact => fact.toLowerCase().replace(/[.!?]+$/, '')
+  const superseded = new Set(checkedList(result.supersededFacts ?? [], 20).map(factKey))
+  const facts = new Map()
+  for (const fact of [...(previous?.facts || []), ...checkedList(result.facts, 20)]) {
+    if (!superseded.has(factKey(fact)) && !/^[\w-]+(?:\.[\w-]+)+\s*[:=]/.test(fact)) facts.set(factKey(fact), fact)
+  }
+  const turn = {
+    id, parent: previous?.id ?? null, input: entry, prose, cast: Object.fromEntries(cast),
+    scene: { location: checkedText(result.scene.location, 150) || previous?.scene.location || '', present },
+    summary: checkedText(result.summary, 2200) || previous?.summary || '',
+    facts: [...facts.values()].slice(-20), state, choices: checkedList(result.choices, 3),
+  }
+  const base = campaign || {
+    version: 1, mode: 'dynamic', id: crypto.randomUUID(), turns: {}, portraits: {},
+    world: { title: checkedText(result.title ?? '', 100) || 'Untitled story', opening: entry, characters: [] },
+  }
+  return { ...base, active: id, turns: { ...base.turns, [id]: turn } }
+}
+
+export function portraitRequest(world, character) {
+  return {
+    scene: {
+      appearance: character.appearance || character.name,
+      action: 'solo character portrait, waist-up, simple background',
+      wardrobe: '', location: '', viewpoint: '',
+      style: world.artStyle || 'painterly illustration',
+    },
+    styleReference: world.styleReference || '',
+  }
+}

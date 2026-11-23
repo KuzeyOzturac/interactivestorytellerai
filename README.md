@@ -14,7 +14,7 @@ npm run build
 python3 local_server.py
 ```
 
-The opening illustration ships with the game. For new illustrated scenes, install the local image dependencies and run the server from that environment.
+Enter an opening passage to start a story. Nightdraft continues the passage, creates important characters, and shows cards for the characters present. It draws one reusable portrait per character. To enable portraits, install the local image dependencies and run the server from that environment.
 
 ```sh
 python3 -m venv .venv
@@ -23,9 +23,9 @@ python -m pip install -r requirements-art.txt
 python local_server.py
 ```
 
-On Windows, activate with `.venv\Scripts\Activate.ps1`. Use the [PyTorch installer](https://pytorch.org/get-started/locally/) to select the right CUDA build if needed. First generation downloads SDXL and IP-Adapter weights. The illustration engine supports NVIDIA CUDA and Apple Metal. Set `NIGHTDRAFT_CPU_ART=1` before launching to try CPU generation, which can be substantially slower. Turn off **Auto-illustrate** to play with saved portraits and generate art on demand.
+On Windows, activate with `.venv\Scripts\Activate.ps1`. Use the [PyTorch installer](https://pytorch.org/get-started/locally/) to select the right CUDA build if needed. First generation downloads SDXL and IP-Adapter weights. The illustration engine supports NVIDIA CUDA and Apple Metal. Set `NIGHTDRAFT_CPU_ART=1` before launching to try CPU generation, which can be substantially slower. In the Journal, turn off automatic portraits to draw them on demand from character cards.
 
-The journal lets you edit remembered facts, update reference portraits, and import or export campaigns. Nightdraft asks the image model for one character each time, using the visible action and setting from the same saved turn. Model output, including likeness and composition, can vary.
+The Journal shows the cast and current story state. Each turn saves character context, scene presence, story facts, and tracked state as JSON. Rewinding restores that turn’s context. Export or import campaigns from the Journal. Older saves and The Last Stop demo retain their original scene art controls.
 
 The server binds to loopback. Keep it local. `NIGHTDRAFT_MODEL` selects an installed Ollama model with structured output support. `NIGHTDRAFT_OLLAMA` selects an alternate Ollama address.
 
@@ -39,7 +39,7 @@ npx playwright install chromium
 npm run test:browser
 ```
 
-GitHub Actions runs these checks on pushes and pull requests. Playwright uses deterministic model responses and exercises the UI, save and reload, rollback, mobile layout, and world creation. To verify live inference, start the local server, submit an action that changes the character's visible pose, then confirm the resulting text and art agree. Rewind and check that the prior image returns.
+GitHub Actions runs these checks on pushes and pull requests. Playwright uses deterministic model responses and exercises the UI, save and reload, rollback, mobile layout, and world creation. To verify live inference, start a story with two named characters. Have one leave and return. Check that their card disappears and returns with the same portrait, and that the Journal keeps track of both characters.
 
 ### Check live illustration accuracy
 

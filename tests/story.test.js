@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { addTurn, attachImage, createCampaign, history, imageRequest, recoverCharacterIllustrations, requestFor } from '../src/story.js'
+import { addTurn, attachImage, createCampaign, dynamicRequest, saveDynamicTurn, history, imageRequest, recoverCharacterIllustrations, requestFor } from '../src/story.js'
 
 const result = (campaign, overrides = {}) => ({
   prose: 'You watch Mara turn to the window.', choices: ['Wait'],
@@ -219,4 +219,40 @@ test('explicit NPC actions and their props survive across unrelated custom world
     assert.equal(next.turns.new.image, '')
     assert.equal(imageRequest(start.world, next.turns.new.scene).scene.action, action)
   }
+})
+
+test('dynamic cast and story state are branch-specific while portraits keep their identity', () => {
+  const opening = 'I meet Nia and Sam aboard a research ship.'
+  const initial = {
+    title: 'The Research Ship', prose: 'Nia unfolds a chart on the bridge.', choices: [],
+    scene: { location: 'Bridge', present: ['nia', 'sam'] },
+    characters: [
+      { id: 'nia', name: 'Nia Cole', appearance: 'Curly hair', context: 'Has the compass.' },
+      { id: 'sam', name: 'Sam', appearance: 'Gray beard', context: 'Pilots the ship.' },
+    ],
+    stateChanges: [{ key: 'item.compass.holder', value: 'Nia' }],
+    facts: ['Nia carries the compass.'], summary: 'The pair met the player.', supersededFacts: [],
+  }
+  const start = saveDynamicTurn(null, 'opening', opening, initial)
+  const action = 'I take the compass from Nia.'
+  const request = dynamicRequest(start, action)
+  const context = JSON.parse(request.messages.at(-1).content)
+  assert.equal(context.currentState['item.compass.holder'], 'Player')
+  assert.deepEqual(context.cast.map(person => person.id), ['nia', 'sam'])
+
+  const changed = saveDynamicTurn(start, 'next', action, {
+    ...initial, prose: 'Nia points to the map. Sam goes below deck.',
+    characters: [{ id: 'nia-cole', name: 'Nia Cole', appearance: '', context: 'Showed the player the route.' }],
+    scene: { location: 'Bridge', present: ['nia-cole', 'nia', 'unknown'] },
+    facts: [], supersededFacts: ['Nia carries the compass.'],
+  })
+  const next = changed.turns.next
+  assert.deepEqual(next.scene.present, ['nia'])
+  assert.equal(next.cast.nia.portraitId, start.turns.opening.cast.nia.portraitId)
+  assert.equal(next.cast.nia.context, 'Showed the player the route.')
+  assert.equal(next.cast.sam.context, 'Pilots the ship.')
+  assert.equal(next.state['item.compass.holder'], 'Player')
+  assert.deepEqual(next.facts, [])
+  assert.equal(changed.turns.opening.cast.nia.context, 'Has the compass.')
+  assert.deepEqual(changed.turns.opening.scene.present, ['nia', 'sam'])
 })

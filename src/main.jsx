@@ -1,55 +1,75 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, cameraAngles, createCampaign, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
+import { addTurn, attachImage, cameraAngles, createCampaign, dynamicRequest, portraitRequest, saveDynamicTurn, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
 import { listCampaigns, readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
 const asset = path => path?.startsWith('data:') ? path : path ? import.meta.env.BASE_URL + path : ''
-async function callModel(route, body) {
+async function callModel(route, body, signal) {
   const response = await fetch('/api/' + route, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+    method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   const data = await response.json().catch(() => null)
   if (!response.ok || !data) throw new Error(data?.error || 'Start the local Nightdraft server and try again.')
   return data
 }
+const restoreCampaign = campaign => campaign.mode === 'dynamic' ? campaign : recoverCharacterIllustrations(campaign)
+
 function exportJSON(campaign) {
   const url = URL.createObjectURL(new Blob([JSON.stringify(campaign, null, 2)], { type: 'application/json' }))
   const link = Object.assign(document.createElement('a'), { href: url, download: 'nightdraft-campaign.json' })
   link.click()
   setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
-function WorldEditor({ onCreate }) {
-  return <form className="editor" onSubmit={event => {
+function StoryOpening({ onStart, busy }) {
+  return <form className="editor opening-form" onSubmit={event => {
     event.preventDefault()
-    const values = new FormData(event.currentTarget)
-    const characters = values.get('characters').split('\n').map(line => line.trim()).filter(Boolean).map((line, index) => {
-      const [name, ...appearance] = line.split('|')
-      return { id: 'character-' + index, name: name.trim(), appearance: appearance.join('|').trim() || name.trim(), reference: '' }
-    })
-    onCreate(createCampaign({
-      title: values.get('title').trim(), premise: values.get('premise').trim(),
-      opening: values.get('opening').trim(), location: values.get('location').trim(),
-      action: values.get('action').trim(), focus: characters[0]?.id || '', characters,
-    }))
+    const entry = new FormData(event.currentTarget).get('opening').trim()
+    if (entry) void onStart(entry)
   }}>
-    <label>Title<input name="title" required maxLength="100"/></label>
-    <label>World and rules<textarea name="premise" required rows="3" maxLength="4000"/></label>
-    <label>Opening scene<textarea name="opening" required rows="4" maxLength="5000"/></label>
-    <label>Location<input name="location" required maxLength="150"/></label>
-    <label>Characters <small>One per line, using Name | Appearance. Put the opening character first.</small><textarea name="characters" rows="3" maxLength="4000"/></label>
-    <label>What the opening character is doing<input name="action" maxLength="250"/></label>
-    <button className="primary">Start new campaign</button>
+    <label>Opening passage<textarea name="opening" required rows="6" maxLength="5000"
+      disabled={busy} placeholder="Where are you, and what’s happening?"/></label>
+    <button className="primary" disabled={busy}><Feather size={18}/> {busy ? 'Starting story…' : 'Start story'}</button>
   </form>
 }
+
+function CastCards({ people, portraits, rendering, failures, onPortrait }) {
+  if (!people.length) return null
+  return <section className="cast" aria-labelledby="cast-title">
+    <h2 id="cast-title">In this scene</h2>
+    <ul>{people.map(person => {
+      const portrait = portraits?.[person.portraitId]
+      const drawing = rendering.includes(person.portraitId)
+      const failure = failures[person.portraitId]
+      return <li key={person.id}>
+        <details className="character-card">
+          <summary>
+            {portrait ? <img src={asset(portrait)} alt=""/> :
+              <span className="portrait-placeholder"><ImageSquare size={26}/>{drawing ? <small>Drawing…</small> : failure && <small>Portrait unavailable</small>}</span>}
+            <span className="character-name">{person.name}</span>
+          </summary>
+          <div className="character-details">
+            {person.context && <p>{person.context}</p>}
+            {person.appearance && <p className="muted">{person.appearance}</p>}
+            {failure && <p className="error" role="alert">{failure}</p>}
+            <button disabled={drawing} onClick={() => onPortrait(person)}>{portrait ? 'Redraw portrait' : 'Draw portrait'}</button>
+          </div>
+        </details>
+      </li>
+    })}</ul>
+  </section>
+}
+
 function App() {
-  const [campaign, setCampaign] = useState(createCampaign)
+  const [campaign, setCampaign] = useState(null)
   const [loaded, setLoaded] = useState(false)
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [rendering, setRendering] = useState([])
   const [error, setError] = useState('')
+  const [portraitFailures, setPortraitFailures] = useState({})
+  const attemptedPortraits = useRef(new Set())
   const [artError, setArtError] = useState('')
   const [saveError, setSaveError] = useState('')
   const [autoArt, setAutoArt] = useState(() => localStorage.getItem('nightdraft-auto-art') !== 'off')
@@ -59,19 +79,21 @@ function App() {
   const current = useRef(campaign)
   const activeRenders = useRef(new Map())
   const transcriptEnd = useRef(null)
-  const turn = campaign.turns[campaign.active]
-  const turns = history(campaign)
-  const character = campaign.world.characters.find(entry => entry.id === turn.scene.focus)
-  const visual = turn.image || character?.reference || [...turns].reverse().find(entry => entry.scene.focus === character?.id && entry.image)?.image
-  const nextTurns = Object.values(campaign.turns).filter(entry => entry.parent === turn.id)
+  const dynamic = campaign?.mode === 'dynamic'
+  const turn = campaign?.turns[campaign.active]
+  const turns = campaign ? history(campaign) : []
+  const present = (turn?.scene.present || []).map(id => turn.cast[id]).filter(Boolean)
+  const character = campaign?.world.characters.find(entry => entry.id === turn.scene.focus)
+  const visual = turn?.image || character?.reference || [...turns].reverse().find(entry => entry.scene.focus === character?.id && entry.image)?.image
+  const nextTurns = campaign ? Object.values(campaign.turns).filter(entry => entry.parent === turn.id) : []
   useEffect(() => {
     let alive = true
     readCampaign().then(saved => {
       if (alive && saved) {
-        const recovered = recoverCharacterIllustrations({ ...saved, id: saved.id || crypto.randomUUID() })
+        const recovered = restoreCampaign({ ...saved, id: saved.id || crypto.randomUUID() })
         current.current = recovered
         setCampaign(recovered)
-        if (autoArt && !recovered.turns[recovered.active].image && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
+        if (recovered.mode !== 'dynamic' && autoArt && !recovered.turns[recovered.active].image && recovered.turns[recovered.active].scene.focus !== saved.turns[saved.active].scene.focus) {
           void renderArt(recovered)
         }
       }
@@ -79,11 +101,11 @@ function App() {
     return () => { alive = false }
   }, [])
   useEffect(() => {
-    if (loaded) writeCampaign(campaign).catch(() => setSaveError('Could not save this campaign on this device. Export a backup.'))
+    if (loaded && campaign) writeCampaign(campaign).catch(() => setSaveError('Could not save this campaign on this device. Export a backup.'))
   }, [campaign, loaded])
   useEffect(() => {
-    if (turn.id !== 'opening') transcriptEnd.current?.scrollIntoView({ block: 'nearest' })
-  }, [turn.id])
+    if (turn?.parent) transcriptEnd.current?.scrollIntoView({ block: 'nearest' })
+  }, [turn?.id])
   useEffect(() => {
     if (panel && !dialog.current.open) dialog.current.showModal()
     if (!panel && dialog.current.open) dialog.current.close()
@@ -95,7 +117,8 @@ function App() {
   }
   async function openLibrary() {
     try {
-      await writeCampaign(current.current)
+      if (current.current) await writeCampaign(current.current)
+      setError('')
       setLibrary(await listCampaigns())
       setPanel('library')
     } catch {
@@ -105,7 +128,7 @@ function App() {
   async function resumeCampaign(id) {
     try {
       const saved = await readCampaign(id)
-      if (saved) replace(recoverCharacterIllustrations(saved))
+      if (saved) replace(restoreCampaign(saved))
     } catch {
       setError('Could not load that campaign.')
     }
@@ -114,6 +137,8 @@ function App() {
     for (const controller of activeRenders.current.values()) controller.abort()
     activeRenders.current.clear()
     setRendering([])
+    setPortraitFailures({})
+    attemptedPortraits.current.clear()
     try {
       await writeCampaign(next, current.current)
     } catch {
@@ -131,6 +156,55 @@ function App() {
     setArtError('')
     update({ ...current.current, active: id })
   }
+  useEffect(() => {
+    if (!loaded || !dynamic || !autoArt) return
+    for (const person of Object.values(turn.cast)) {
+      if (!campaign.portraits?.[person.portraitId] && !attemptedPortraits.current.has(person.portraitId)) {
+        void renderPortrait(person)
+      }
+    }
+  }, [campaign, loaded, autoArt])
+
+  async function renderPortrait(person) {
+    const snapshot = current.current
+    const id = person.portraitId
+    if (activeRenders.current.has(id)) return
+    const controller = new AbortController()
+    attemptedPortraits.current.add(id)
+    activeRenders.current.set(id, controller)
+    setRendering([...activeRenders.current.keys()])
+    setPortraitFailures(previous => ({ ...previous, [id]: '' }))
+    try {
+      const data = await callModel('image', portraitRequest(snapshot.world, person), controller.signal)
+      const latest = current.current
+      if (!data.image?.startsWith('data:image/webp;base64,')) throw new Error('The renderer returned no portrait.')
+      if (!controller.signal.aborted && latest?.id === snapshot.id) {
+        update({ ...latest, portraits: { ...latest.portraits, [id]: data.image } })
+      }
+    } catch (failure) {
+      if (!controller.signal.aborted) setPortraitFailures(previous => ({ ...previous, [id]: failure.message }))
+    } finally {
+      if (activeRenders.current.get(id) === controller) {
+        activeRenders.current.delete(id)
+        setRendering([...activeRenders.current.keys()])
+      }
+    }
+  }
+
+  async function startStory(entry) {
+    if (busy || !loaded) return
+    setBusy(true)
+    setError('')
+    try {
+      const result = await callModel('turn', dynamicRequest(null, entry, true))
+      await replace(saveDynamicTurn(null, 'opening', entry, result))
+    } catch (failure) {
+      setError(failure.message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function renderArt(snapshot) {
     const id = snapshot.active
     const selected = snapshot.turns[id]
@@ -201,7 +275,7 @@ function App() {
     setArtError('')
     setInput(action)
     try {
-      const request = requestFor(base, action)
+      const request = base.mode === 'dynamic' ? dynamicRequest(base, action) : requestFor(base, action)
       let result = await callModel('turn', request)
       if (repeatsPlayerEntry(action, result.prose) || isNarratorCommentary(result.prose)) {
         const [instructions, ...context] = request.messages
@@ -213,10 +287,11 @@ function App() {
           throw new Error('The narrator repeated your entry. Try the turn again.')
         }
       }
-      const next = addTurn({ ...current.current, active: base.active }, crypto.randomUUID(), action, result)
+      const save = base.mode === 'dynamic' ? saveDynamicTurn : addTurn
+      const next = save({ ...current.current, active: base.active }, crypto.randomUUID(), action, result)
       update(next)
       setInput('')
-      if (autoArt && next.turns[next.active].scene.focus && !next.turns[next.active].image) void renderArt(next)
+      if (base.mode !== 'dynamic' && autoArt && next.turns[next.active].scene.focus && !next.turns[next.active].image) void renderArt(next)
     } catch (failure) {
       setError(failure.message)
     } finally {
@@ -235,9 +310,13 @@ function App() {
         const item = data.turns[id]
         if (item.id !== id || typeof item.prose !== 'string' || !Array.isArray(item.choices) ||
             !Array.isArray(item.facts) || !item.scene || typeof item.scene.location !== 'string') throw new Error()
+        if (data.mode === 'dynamic' && (!item.cast || !Array.isArray(item.scene.present) ||
+          item.scene.present.some(key => !Object.hasOwn(item.cast, key)) ||
+          Object.values(item.cast).some(person => typeof person?.id !== 'string' || typeof person.name !== 'string' ||
+            typeof person.portraitId !== 'string'))) throw new Error()
         history(data, id)
       }
-      replace(recoverCharacterIllustrations({ ...data, id: crypto.randomUUID() }))
+      replace(restoreCampaign({ ...data, id: crypto.randomUUID() }))
     } catch {
       setError('Choose a valid Nightdraft campaign export.')
     }
@@ -247,16 +326,25 @@ function App() {
     <header className="masthead"><div className="brand"><Feather size={24}/><span>Nightdraft</span></div>
       <nav aria-label="Campaign controls">
         <button disabled={busy || !loaded} onClick={openLibrary}>Campaigns</button>
-        <button disabled={busy || !loaded} onClick={() => setPanel('world')}><BookOpen size={18}/> <span>New world</span></button>
-        <button disabled={busy || !loaded} onClick={() => setPanel('journal')}><Notebook size={18}/> <span>Journal</span></button>
+        <button disabled={busy || !loaded} onClick={() => setPanel('world')}><BookOpen size={18}/> <span>New story</span></button>
+        <button disabled={busy || !loaded || !campaign} onClick={() => setPanel('journal')}><Notebook size={18}/> <span>Journal</span></button>
       </nav>
     </header>
-    <main className="room">
+    {!campaign && <main className="start-screen">
+      <h1>Start your story</h1>
+      <p>Write the opening. Nightdraft continues it and builds the cast as you play.</p>
+      {loaded && <StoryOpening onStart={startStory} busy={busy}/>}
+      {(saveError || (!panel && error)) && <p className="error" role="alert">{saveError || error}</p>}
+    </main>}
+    {campaign && <main className={dynamic ? 'room dynamic-room' : 'room'}>
       <section className="story" aria-labelledby="story-title">
         <div className="heading"><p className="eyebrow">{turn.scene.location}</p><h1 id="story-title">{campaign.world.title}</h1></div>
+        {dynamic && <CastCards people={present} portraits={campaign.portraits} rendering={rendering}
+          failures={portraitFailures} onPortrait={renderPortrait}/>}
         <div className="transcript" aria-label="Story transcript">
           {turns.map(entry => <article key={entry.id} className="passage">
-            {entry.input && <p className="player-action">{entry.input}</p>}
+            {entry.input && entry.input.split(/\n+/).map((paragraph, index) =>
+              <p key={'entry-' + index} className={entry.parent ? 'player-action' : undefined}>{paragraph}</p>)}
             {entry.prose.split(/\n+/).map((paragraph, index) => <p key={index}>{paragraph}</p>)}
           </article>)}
           <div ref={transcriptEnd}/>
@@ -284,7 +372,7 @@ function App() {
           {(error || saveError) && <p role="alert" className="error">{error || saveError}</p>}
         </div>
       </section>
-      <aside className="scene" aria-labelledby="scene-title">
+      {!dynamic && <aside className="scene" aria-labelledby="scene-title">
         <div className="scene-label"><ImageSquare size={19}/><h2 id="scene-title">Character illustration</h2></div>
         <figure>
           {visual ? <img src={asset(visual)} alt={turn.image ? `${character?.name || 'Character'} · ${turn.scene.action}` : `Reference for ${character?.name || 'character'}`}/>
@@ -317,15 +405,23 @@ function App() {
         {rendering.includes(turn.id) && <p role="status">Drawing the character locally…</p>}
         {character && visual && !turn.image && <p className="muted">Showing previously saved character art.</p>}
         {artError && <p role="alert" className="error">{artError}</p>}
-      </aside>
-    </main>
+      </aside>}
+    </main>}
     <dialog ref={dialog} onClose={() => setPanel('')} aria-labelledby="dialog-title">
-      <div className="dialog-heading"><h2 id="dialog-title">{panel === 'world' ? 'Create a world' : panel === 'library' ? 'Saved campaigns' : 'Campaign journal'}</h2>
+      <div className="dialog-heading"><h2 id="dialog-title">{panel === 'world' ? 'Start a new story' : panel === 'library' ? 'Saved campaigns' : 'Campaign journal'}</h2>
         <button aria-label="Close dialog" onClick={() => setPanel('')}><X size={20}/></button></div>
       {panel === 'library' ? <>
-        <button onClick={() => replace(createCampaign())}>Start The Last Stop again</button>
-        <ul>{library.map(save => <li key={save.id}><button onClick={() => resumeCampaign(save.id)} disabled={save.id === campaign.id}>{save.title}</button></li>)}</ul>
-      </> : panel === 'world' ? <><p>Your current campaign stays in Saved campaigns.</p><button onClick={() => exportJSON(campaign)}><DownloadSimple size={18}/> Export current campaign</button><WorldEditor onCreate={replace}/></> : panel === 'journal' &&
+        <div className="journal-actions">
+          <button disabled={busy} onClick={() => replace(createCampaign())}>Start The Last Stop again</button>
+          <label className="upload"><UploadSimple size={18}/> Import campaign<input type="file" accept=".json,application/json" onChange={importCampaign}/></label>
+        </div>
+        {error && <p role="alert" className="error">{error}</p>}
+        <ul>{library.map(save => <li key={save.id}><button onClick={() => resumeCampaign(save.id)} disabled={save.id === campaign?.id}>{save.title}</button></li>)}</ul>
+      </> : panel === 'world' ? <>
+        {campaign && <p>Your current story stays in Saved campaigns.</p>}
+        <StoryOpening onStart={startStory} busy={busy}/>
+        {error && <p role="alert" className="error">{error}</p>}
+      </> : panel === 'journal' && campaign &&
         <>
           <div className="journal-actions"><button onClick={() => exportJSON(campaign)}><DownloadSimple size={18}/> Export</button>
             <label className="upload"><UploadSimple size={18}/> Import campaign<input type="file" accept=".json,application/json" onChange={importCampaign}/></label></div>
@@ -358,14 +454,24 @@ function App() {
               setError(failure.message)
             }
           }}>
-            <label>Art style <small>Used for automatic illustrations in this world. Leave blank for no style prompt.</small>
+            <label>Art style <small>{dynamic ? 'Used for new portraits. Leave blank for the default painterly style.' : 'Used for automatic illustrations in this world. Leave blank for no style prompt.'}</small>
               <input name="artStyle" defaultValue={campaign.world.artStyle || ''} placeholder="e.g. muted watercolor" maxLength="70"/>
             </label>
             <label>Style reference <small>Optional image for palette and brushwork.</small><input type="file" name="styleReference" accept="image/png,image/jpeg,image/webp"/></label>
             {campaign.world.styleReference && <label><input type="checkbox" name="clearStyle"/> Remove style reference</label>}
             <button>Save art style</button>
           </form>
-          <h3>Character references</h3>
+          {dynamic ? <>
+            <label className="portrait-setting"><input type="checkbox" checked={autoArt} onChange={event => {
+              setAutoArt(event.target.checked)
+              localStorage.setItem('nightdraft-auto-art', event.target.checked ? 'on' : 'off')
+            }}/> Draw new character portraits automatically</label>
+            <h3>Cast</h3>
+            {Object.values(turn.cast).map(person => <details key={person.id} className="journal-character">
+              <summary>{person.name}{turn.scene.present.includes(person.id) ? ' · Present' : ''}</summary>
+              <p>{person.context || person.appearance}</p>
+            </details>)}
+          </> : <><h3>Character references</h3>
           {campaign.world.characters.length === 0 && <p>No characters in this world yet.</p>}
           {campaign.world.characters.map(entry => <label key={entry.id}>{entry.name}
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={event => {
@@ -384,7 +490,7 @@ function App() {
                 update({ ...current.current, world: { ...world, characters: world.characters.map(person => person.id === entry.id ? { ...person, reference: reader.result } : person) } })
               }
               reader.readAsDataURL(file)
-            }}/>{entry.reference && <small>Reference saved</small>}</label>)}
+            }}/>{entry.reference && <small>Reference saved</small>}</label>)}</>}
         </>}
     </dialog>
   </>

@@ -16,7 +16,7 @@ test('adventure renders scene art, remembers facts after reload, and rewinds', a
     expect(scene.location).toBe('Ferry deck')
     await route.fulfill({ json: { image, reviewed: true } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await expect(page.getByRole('img', { name: /Mara Venn/ })).toBeVisible()
   await page.getByLabel('Your move').fill('Board the ferry and ask Theo about his light')
   await page.getByRole('button', { name: 'Continue' }).click()
@@ -36,27 +36,12 @@ test('adventure renders scene art, remembers facts after reload, and rewinds', a
 test('mobile layout fits and a failed model request preserves the action', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.route('**/api/turn', route => route.fulfill({ status: 503, json: { error: 'Start Ollama on this computer, then try again.' } }))
-  await page.goto('/')
+  await startDemo(page)
   await page.getByLabel('Your move').fill('I take the key')
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByRole('alert')).toContainText('Start Ollama')
   await expect(page.getByLabel('Your move')).toHaveValue('I take the key')
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
-})
-
-test('world editor creates a new playable campaign', async ({ page }) => {
-  await page.goto('/')
-  await page.getByRole('button', { name: 'New world' }).click()
-  await page.getByLabel('Title').fill('The Hush Signal')
-  await page.getByLabel('World and rules').fill('An attic radio only works during snow.')
-  await page.getByLabel('Opening scene').fill('The radio crackles.')
-  await page.getByLabel('Location', { exact: true }).fill('The attic')
-  await page.getByLabel('Characters').fill('Vera Bell | An adult radio operator with a silver buzz cut')
-  await page.getByLabel('What the opening character is doing').fill('Tunes the radio')
-  await page.getByRole('button', { name: 'Start new campaign' }).click()
-  await expect(page.getByRole('heading', { name: 'The Hush Signal' })).toBeVisible()
-  await expect(page.getByRole('complementary').getByText('Vera Bell', { exact: true })).toBeVisible()
-  await expect(page.getByText('Tunes the radio', { exact: true })).toBeVisible()
 })
 
 test('playing ahead keeps an earlier scene render attached to its own turn', async ({ page }) => {
@@ -73,7 +58,7 @@ test('playing ahead keeps an earlier scene render attached to its own turn', asy
     if (route.request().postDataJSON().scene.action.includes('Hoists')) await firstReady
     await route.fulfill({ json: { image } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByLabel('Your move').fill('Board the ferry')
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('Drawing the character locally…')).toBeVisible()
@@ -95,7 +80,7 @@ test('the apartment beat displays the reviewed image, with no render request', a
     renders++
     await route.fulfill({ json: { image } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByLabel('Your move').fill('You take Mara to your apartment.')
   await page.getByRole('button', { name: 'Continue' }).click()
   const illustration = page.getByRole('img', { name: /Mara Venn.*hangs/i })
@@ -116,7 +101,7 @@ test('an echoed player entry is retried and only new narration is saved', async 
       scene: { ...generated.scene, focus: 'none' },
     } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByLabel('Your move').fill(entry)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('Mara slips the key into her coat.')).toBeVisible()
@@ -135,7 +120,7 @@ test('art direction can correct an illustration without rewriting the story', as
     expect(route.request().postDataJSON().depthGuide).toMatch(/^data:image\/webp;base64,/)
     await route.fulfill({ json: { image } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByText('Adjust illustration').click()
   await page.getByLabel('Visible action').fill('Reaches up to hang a wet coat on the wall hook')
   await page.getByLabel('Setting', { exact: true }).fill('Inside the apartment entryway')
@@ -160,7 +145,7 @@ test('an exact image prompt is sent without narration details', async ({ page })
     expect(request.scene).not.toHaveProperty('details')
     await route.fulfill({ json: { image } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByText('Adjust illustration').click()
   await page.getByLabel('Exact image prompt').fill('portrait')
   const response = page.waitForResponse('**/api/image')
@@ -179,7 +164,7 @@ test('narrator commentary is retried and excluded from the transcript', async ({
       scene: { ...generated.scene, focus: 'none' },
     } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByLabel('Your move').fill(entry)
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('Mara recognizes the notch cut into the key.')).toBeVisible()
@@ -193,7 +178,7 @@ test('world art style persists and is sent to the illustration renderer', async 
     expect(route.request().postDataJSON().styleReference).toMatch(/^data:image\/webp;base64,/)
     await route.fulfill({ json: { image } })
   })
-  await page.goto('/')
+  await startDemo(page)
   await page.getByRole('button', { name: 'Journal' }).click()
   await page.getByRole('textbox', { name: 'Art style' }).fill('muted watercolor')
   await page.getByLabel('Style reference').setInputFiles({ name: 'style.webp', mimeType: 'image/webp', buffer: Buffer.from(image.split(',')[1], 'base64') })
@@ -205,14 +190,83 @@ test('world art style persists and is sent to the illustration renderer', async 
   expect((await response).ok()).toBe(true)
 })
 
-test('starting over leaves earlier campaigns available after reload', async ({ page }) => {
+const opening = 'The radio crackles. Vera Bell leans close to the speaker.'
+const firstTurn = {
+  title: 'The Hush Signal', prose: 'Vera catches a faint distress call.', choices: [],
+  scene: { location: 'The attic', present: ['vera'] },
+  characters: [{ id: 'vera', name: 'Vera Bell', appearance: 'Radio operator with silver hair', context: 'Knows how to tune the radio.' }],
+  facts: ['The radio works during snow.'], summary: 'A distress signal reached the attic.',
+  stateChanges: [], supersededFacts: [],
+}
+
+async function startDemo(page) {
   await page.goto('/')
-  await page.getByRole('button', { name: 'New world' }).click()
-  await page.getByLabel('Title').fill('The Hush Signal')
-  await page.getByLabel('World and rules').fill('A radio only works in the snow.')
-  await page.getByLabel('Opening scene').fill('The radio crackles.')
-  await page.getByLabel('Location', { exact: true }).fill('The attic')
-  await page.getByRole('button', { name: 'Start new campaign' }).click()
+  await page.getByRole('button', { name: 'Campaigns', exact: true }).click()
+  await page.getByRole('button', { name: 'Start The Last Stop again' }).click()
+}
+
+test('a player-written opening builds a cast, saves portraits, and updates scene presence', async ({ page }) => {
+  const second = { id: 'amin', name: 'Amin Vale', appearance: 'Weathered rescue pilot', context: 'Has a map of the valley.' }
+  let imageRequests = 0
+  await page.route('**/api/image', async route => {
+    imageRequests++
+    const request = route.request().postDataJSON()
+    expect(request.scene.action).toContain('solo character portrait')
+    expect(request.scene.location).toBe('')
+    await route.fulfill({ json: { image } })
+  })
+  await page.route('**/api/turn', async route => {
+    const request = route.request().postDataJSON()
+    const context = JSON.parse(request.messages.at(-1).content)
+    if (context.opening) {
+      expect(context.opening).toBe(opening)
+      await route.fulfill({ json: firstTurn })
+      return
+    }
+    expect(context.cast.some(person => person.id === 'vera')).toBe(true)
+    const returns = context.playerEntry === 'Vera comes back.'
+    await route.fulfill({ json: {
+      ...firstTurn,
+      prose: returns ? 'Vera holds up a folded map. A rescue pilot named Amin Vale follows her.' : 'The stairs creak as Vera descends.',
+      scene: { location: 'The attic', present: returns ? ['vera', 'amin'] : [] },
+      characters: returns ? [second] : [{ id: 'vera', name: '', appearance: '', context: 'Went downstairs to check the signal.' }],
+    } })
+  })
+  await page.goto('/')
+  await page.getByLabel('Opening passage').fill(opening)
+  await page.getByRole('button', { name: 'Start story', exact: true }).click()
+  await expect(page.getByText(opening, { exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'The Hush Signal' })).toBeVisible()
+  const cast = page.getByRole('region', { name: 'In this scene' })
+  await expect(cast.locator('img')).toBeVisible()
+  await cast.getByText('Vera Bell', { exact: true }).click()
+  await expect(cast.getByText('Knows how to tune the radio.')).toBeVisible()
+
+  await page.getByLabel('Your move').fill('Vera leaves the room.')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(page.getByText('The stairs creak as Vera descends.')).toBeVisible()
+  await expect(cast).toHaveCount(0)
+  await page.getByRole('button', { name: 'Journal' }).click()
+  await page.getByText('Vera Bell', { exact: true }).click()
+  await expect(page.getByText('Went downstairs to check the signal.')).toBeVisible()
+  await page.getByRole('button', { name: 'Close dialog' }).click()
+  await page.getByLabel('Your move').fill('Vera comes back.')
+  await page.getByRole('button', { name: 'Continue' }).click()
+  await expect(cast.locator('img')).toHaveCount(2)
+  await expect(cast.getByText('Amin Vale')).toBeVisible()
+  await page.reload()
+  await expect(cast.locator('img')).toHaveCount(2)
+  expect(imageRequests).toBe(2)
+  await page.getByRole('button', { name: 'Rewind' }).click()
+  await expect(cast).toHaveCount(0)
+})
+
+test('starting over leaves earlier campaigns available after reload', async ({ page }) => {
+  await page.route('**/api/turn', route => route.fulfill({ json: firstTurn }))
+  await page.route('**/api/image', route => route.fulfill({ json: { image } }))
+  await page.goto('/')
+  await page.getByLabel('Opening passage').fill(opening)
+  await page.getByRole('button', { name: 'Start story', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'The Hush Signal' })).toBeVisible()
   await page.reload()
   await page.getByRole('button', { name: 'Campaigns', exact: true }).click()
