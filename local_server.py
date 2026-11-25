@@ -164,6 +164,21 @@ def narrate(data):
             if not passes:
                 correction = "Write a fresh turn beginning after every stated event and outcome in the latest player entry. Update the scene and choices accordingly. Continuity issue: " + reason
                 retry = [{**messages[0], "content": messages[0]["content"] + "\n" + correction}, *messages[1:]]
+                if "characters" in data["format"].get("properties", {}):
+                    # Keep player-authored events and remove the prose that anchored the stale draft.
+                    focused = {key: value for key, value in context.items() if key not in {
+                        "recent", "relevantMemories", "playerEntry",
+                    }}
+                    focused["earlier_player_entries"] = [
+                        item["entry"] for item in context.get("recent", [])
+                        if isinstance(item, dict) and item.get("entry")
+                    ]
+                    focused["playerEntry"] = context["playerEntry"]
+                    retry[-1] = {**retry[-1], "content": json.dumps(focused, ensure_ascii=False)}
+                    retry[0]["content"] += (
+                        "\nMake the consequences visible in the prose. If the entry says someone "
+                        "was freed, show them free or reacting to their freedom in the next passage."
+                    )
                 turn = anchor_destination(context, ollama_json(MODEL, retry, data["format"], {**options, "temperature": 0.35}))
                 passes, reason = review_continuation(context, turn)
                 if not passes:
