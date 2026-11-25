@@ -116,7 +116,9 @@ def review_story(context, turn):
             "Reject only a specific contradiction, a passage that ignores the entry and continues the old "
             "action, or a choice to redo an explicitly completed action. An unchanged location is fine "
             "unless the entry establishes a different location. Ignore prose style and formatting. "
-            "If rejecting, name the player's exact established event and what part of the draft conflicts. "
+            "Check each clause separately. For example, after a successful rescue, a draft portraying the "
+            "rescued person as still unreachable or suggesting that the player go find them must fail. "
+            "If rejecting, name the exact established event and what part of the draft conflicts. "
             "If there is no concrete conflict, return passes=true and an empty reason."
         )},
         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
