@@ -146,7 +146,7 @@ export function requestFor(campaign, input) {
     },
     messages: [
       { role: 'system', content: [
-        'Continue interactive fiction. The player is the protagonist, called “you.” All named cast members are NPCs. The latest playerEntry is already in the story. Start with the next event, without quoting, restating, or explaining the entry. An attempt can fail. Never decide a new action for the player.',
+        'Continue interactive fiction. The player is the protagonist, called “you.” All named cast members are NPCs. Every action or outcome stated in the latest playerEntry has already happened and overrides older context. Start with its aftermath without restating it. An explicitly attempted action can fail. Never decide a new action for the player.',
         'Base the turn on the latest entry before older context. If playerDestination is set, the player is already there at the start of your continuation. Keep the player there for this turn. If playerVisibleAction is set, use that established action to frame the image. When someone went with the player, keep them present. Do not move absent characters off-screen or invent where they are.',
         'Example: entry “You bring the watchmaker to your room.” Prose “He stops by the window and listens.” Location “Your room.” The watchmaker is with you.',
         'Current state describes the present. playerStateChanges have already happened. Reuse existing state keys. For custody use item.<item-slug>.holder, one key per item. Return only changes, with an empty value to clear a key. Keep past events in the summary and durable facts in plain sentences. Copy obsolete facts into supersededFacts.',
@@ -193,6 +193,13 @@ export function repeatsPlayerEntry(entry, prose) {
   const normalize = text => text.normalize('NFKC').toLowerCase()
     .replace(/[^\p{L}\p{N}]+/gu, ' ').trim().replace(/^(?:i|you) /, '')
   return normalize(entry) === normalize(prose)
+}
+
+export function repeatsPriorPassage(campaign, prose) {
+  const normalize = text => text.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  if (!campaign || typeof prose !== 'string' || !prose.trim()) return false
+  const passage = normalize(prose)
+  return history(campaign).slice(-5).some(turn => normalize(turn.prose) === passage)
 }
 
 function checkedText(value, max) {
@@ -396,7 +403,8 @@ export function dynamicRequest(campaign, entry, opening = false) {
     messages: [
       { role: 'system', content: [
         'Write the next passage of interactive fiction. The player is the protagonist. Preserve the opening and player entries as canon. Continue with the next event, never echo or explain the entry and never decide a new action for the player.',
-        opening ? 'Give the story a short title. Establish the scene directly after the supplied opening.' : 'Continue from the latest player entry. Keep established continuity.',
+        opening ? 'Give the story a short title. Establish the scene directly after the supplied opening.' : 'The latest playerEntry is the newest established event and overrides conflicting older context. Actions stated as happening or completed have already happened, including every explicitly stated outcome. Only resolve uncertainty when the entry itself describes an attempt, intention, or uncertain outcome. Begin with a concrete consequence or reaction after the final event in the entry. Update the scene, character context, facts and choices to reflect its aftermath.',
+        ...(!opening ? ['Example: “I repair the bridge and lead Ada across.” Begin on the far bank with Ada reacting. The bridge is repaired, Ada has crossed, and crossing is no longer a suggested action.'] : []),
         'List important non-player characters only. Return characters for new introductions or changes only. Give each new character a distinct short lowercase ID, name, and concise stable visual features for a solo portrait. Omit temporary expressions, poses, and scenery. Reuse existing IDs. Context is the updated current role, knowledge, goals and relationship with the player, replacing obsolete information. Update context whenever a character changes plans, leaves, learns something, or when prior context has become obsolete. Record only what the story has established. For existing characters, use empty strings for unchanged fields.',
         'scene.present is the full list of IDs of important characters physically present at the end of your passage. Include still-present characters and those introduced in the player entry. Exclude the player, departed characters, distant speakers, and people only mentioned. Empty list when the player is alone.',
         'Summarize only events established in the opening, entries, or narrated passages. Facts must be established and worth remembering. Track important objects and their current holders using item.<item-slug>.holder. Return only keyed stateChanges, using existing keys and an empty value to remove a key. PlayerStateChanges are authoritative. List obsolete facts in supersededFacts. Supply up to three short actions the player could choose.',
@@ -421,7 +429,7 @@ export function saveDynamicTurn(campaign, id, entry, result) {
     if (!leading || !repeatsPlayerEntry(sentence, leading.replace(/\b(\w+)[\s:,]+\1\b/gi, '$1'))) break
     prose = prose.slice(leading.length).trimStart()
   }
-  if (!prose || isNarratorCommentary(prose) || repeatsPlayerEntry(entry, prose)) {
+  if (!prose || isNarratorCommentary(prose) || repeatsPlayerEntry(entry, prose) || repeatsPriorPassage(campaign, prose)) {
     throw new Error('The narrator did not continue the story. Try again.')
   }
   if (!Array.isArray(result.characters) || !Array.isArray(result.scene?.present)) {

@@ -208,6 +208,7 @@ async function startDemo(page) {
 test('a player-written opening builds a cast, saves portraits, and updates scene presence', async ({ page }) => {
   const second = { id: 'amin', name: 'Amin Vale', appearance: 'Weathered rescue pilot', context: 'Has a map of the valley.' }
   let imageRequests = 0
+  let departureAttempts = 0
   await page.route('**/api/image', async route => {
     imageRequests++
     const request = route.request().postDataJSON()
@@ -225,6 +226,11 @@ test('a player-written opening builds a cast, saves portraits, and updates scene
     }
     expect(context.cast.some(person => person.id === 'vera')).toBe(true)
     const returns = context.playerEntry === 'Vera comes back.'
+    if (!returns && ++departureAttempts === 1) {
+      await route.fulfill({ json: firstTurn })
+      return
+    }
+    if (!returns) expect(request.messages[0].content).toContain('Start with their aftermath.')
     await route.fulfill({ json: {
       ...firstTurn,
       prose: returns ? 'Vera holds up a folded map. A rescue pilot named Amin Vale follows her.' : 'The stairs creak as Vera descends.',
@@ -246,6 +252,7 @@ test('a player-written opening builds a cast, saves portraits, and updates scene
   await page.getByRole('button', { name: 'Continue' }).click()
   await expect(page.getByText('The stairs creak as Vera descends.')).toBeVisible()
   await expect(cast).toHaveCount(0)
+  expect(departureAttempts).toBe(2)
   await page.getByRole('button', { name: 'Journal' }).click()
   await page.getByText('Vera Bell', { exact: true }).click()
   await expect(page.getByText('Went downstairs to check the signal.')).toBeVisible()

@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import { ArrowCounterClockwise, BookOpen, DownloadSimple, Feather, GitBranch, ImageSquare, Notebook, PaperPlaneTilt, UploadSimple, X } from '@phosphor-icons/react'
-import { addTurn, attachImage, cameraAngles, createCampaign, dynamicRequest, portraitRequest, saveDynamicTurn, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, requestFor } from './story.js'
+import { addTurn, attachImage, cameraAngles, createCampaign, dynamicRequest, portraitRequest, saveDynamicTurn, history, imageRequest, isNarratorCommentary, recoverCharacterIllustrations, repeatsPlayerEntry, repeatsPriorPassage, requestFor } from './story.js'
 import { listCampaigns, readCampaign, writeCampaign } from './storage.js'
 import './style.css'
 
@@ -277,14 +277,16 @@ function App() {
     try {
       const request = base.mode === 'dynamic' ? dynamicRequest(base, action) : requestFor(base, action)
       let result = await callModel('turn', request)
-      if (repeatsPlayerEntry(action, result.prose) || isNarratorCommentary(result.prose)) {
+      const invalid = prose => repeatsPlayerEntry(action, prose) || isNarratorCommentary(prose) ||
+        (base.mode === 'dynamic' && repeatsPriorPassage(base, prose))
+      if (invalid(result.prose)) {
         const [instructions, ...context] = request.messages
         result = await callModel('turn', { ...request, messages: [
-          { ...instructions, content: instructions.content + ' Retry the turn. Start where the latest entry leaves the player. Write the next event directly as fiction, with no echo or commentary.' },
+          { ...instructions, content: instructions.content + ' Retry the turn. Treat all stated events and outcomes in the latest entry as established. Start with their aftermath. Write fresh fiction without reusing an earlier passage.' },
           ...context,
         ] })
-        if (repeatsPlayerEntry(action, result.prose)) {
-          throw new Error('The narrator repeated your entry. Try the turn again.')
+        if (invalid(result.prose)) {
+          throw new Error('The narrator could not continue from your entry. Your entry is still available to retry.')
         }
       }
       const save = base.mode === 'dynamic' ? saveDynamicTurn : addTurn

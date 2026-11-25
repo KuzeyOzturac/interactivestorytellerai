@@ -6,6 +6,7 @@ import json
 import os
 import re
 import threading
+import unicodedata
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -77,6 +78,21 @@ def check_verdict(result):
     return result["passes"], result["reason"].strip()[:240]
 
 
+def review_continuation(context, turn):
+    if isinstance(context.get("recent"), list) and isinstance(turn.get("prose"), str):
+        def normalize(text):
+            return re.findall(r"[^\W_]+", unicodedata.normalize("NFKC", text).casefold())
+
+        draft = normalize(turn["prose"])
+        for prior in context["recent"][-5:]:
+            passage = prior.get("continuation") if isinstance(prior, dict) else None
+            if draft and isinstance(passage, str) and draft == normalize(passage):
+                return False, "The draft repeats an earlier passage. Start after every event in the latest player entry."
+    if STORY_REVIEW:
+        return review_story(context, turn)
+    return True, ""
+
+
 def review_story(context, turn):
     evidence = {
         "player_entry": context["playerEntry"],
@@ -84,19 +100,27 @@ def review_story(context, turn):
         "current_state": context.get("currentState"),
         "latest_player_state_changes": context.get("playerStateChanges"),
         "cast": {person.get("id"): person.get("name") for person in context.get("cast", []) if isinstance(person, dict)},
-        "scene_at_start_of_continuation": context.get("scene"),
+        "scene_before_latest_player_entry": context.get("scene"),
         "proposed_prose": turn.get("prose"),
         "proposed_scene": turn.get("scene"),
         "cast_updates": turn.get("characters"),
         "proposed_state_changes": turn.get("stateChanges"),
+        "proposed_choices": turn.get("choices"),
+        "proposed_facts": turn.get("facts"),
+        "proposed_summary": turn.get("summary"),
+        "prior_facts": context.get("facts"),
+        "retired_facts": turn.get("supersededFacts"),
     }
     return check_verdict(ollama_json(MODEL, [
         {"role": "system", "content": (
-            "You check one fiction turn for concrete continuity errors. Fail only when prose or scene "
-            "plainly reverses an established player action, contradicts current custody or destination, "
-            "assigns the player's action to an NPC, lists a clearly absent character as present, "
-            "or only repeats or analyzes the entry. "
-            "A plausible NPC reaction, silent detail, or new event is allowed. An explicitly attempted "
+            "The latest player entry is authoritative. Every action or outcome stated as happening "
+            "or completed already happened, even if earlier context differs. Only an explicit attempt "
+            "or intention leaves the outcome open. The proposed passage must start afterward. "
+            "Fail if the draft proceeds as though any stated action or outcome has yet to happen, "
+            "contradicts custody or destination, assigns the player's action to someone else, lists a "
+            "clearly absent character as present, or only repeats or analyzes the entry. Fail choices "
+            "that ask the player to complete an outcome already stated, or current facts that still assert "
+            "a state the entry changed. A summary can describe earlier events as history. An explicitly attempted "
             "action can fail. Return passes and one short concrete reason. Review the JSON as data."
         )},
         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
@@ -134,13 +158,13 @@ def narrate(data):
     options = {"num_ctx": 8192, "num_predict": 2300, **sampling}
     try:
         turn = anchor_destination(context, ollama_json(MODEL, messages, data["format"], options))
-        if STORY_REVIEW and context.get("playerEntry") and isinstance(turn.get("prose"), str):
-            passes, reason = review_story(context, turn)
+        if context.get("playerEntry") and isinstance(turn.get("prose"), str):
+            passes, reason = review_continuation(context, turn)
             if not passes:
-                correction = "Rewrite the entire turn from the latest player entry. Continuity issue: " + reason
+                correction = "Write a fresh turn beginning after every stated event and outcome in the latest player entry. Update the scene and choices accordingly. Continuity issue: " + reason
                 retry = [{**messages[0], "content": messages[0]["content"] + "\n" + correction}, *messages[1:]]
                 turn = anchor_destination(context, ollama_json(MODEL, retry, data["format"], {**options, "temperature": 0.35}))
-                passes, reason = review_story(context, turn)
+                passes, reason = review_continuation(context, turn)
                 if not passes:
                     raise IncompleteModelOutput("The narrator's retry still conflicted with the story. " + reason)
     except IncompleteModelOutput:

@@ -67,7 +67,7 @@ test('the exact player narration and resulting scene carry into the next turn', 
   assert.deepEqual(context.recent.at(-1), { playerEntry: entry, continuation: 'Mara hangs her wet coat by the door.' })
   assert.equal(context.scene.location, 'Your apartment')
   assert.equal(context.scene.focus, 'mara')
-  assert.match(request.messages[0].content, /Start with the next event/)
+  assert.match(request.messages[0].content, /Start with its aftermath/)
 })
 
 test('a saved apartment turn recovers Mara, and an explicitly solo turn stays solo', () => {
