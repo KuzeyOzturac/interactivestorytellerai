@@ -194,7 +194,7 @@ class ModelReviewTest(unittest.TestCase):
 
     def test_repeated_passage_is_retried_even_without_model_review(self):
         context = {"playerEntry": "I free the princess.", "recent": [
-            {"continuation": "The firelight flickers beyond the fortress."}
+            {"entry": "I reach the fortress.", "continuation": "The firelight flickers beyond the fortress."}
         ]}
         messages = [{"role": "system", "content": "Narrate."},
                     {"role": "user", "content": json.dumps(context)}]
@@ -202,7 +202,12 @@ class ModelReviewTest(unittest.TestCase):
         fresh = {"prose": "The princess thanks you and asks about the road home."}
         with patch.object(local_server, "STORY_REVIEW", False), \
              patch.object(local_server, "ollama_json", side_effect=[stale, fresh]) as chat:
-            self.assertEqual(local_server.narrate({"messages": messages, "format": {}}), fresh)
+            request = {"messages": messages, "format": {"properties": {"characters": {}}}}
+            self.assertEqual(local_server.narrate(request), fresh)
+        retry_context = json.loads(chat.call_args.args[1][-1]["content"])
+        self.assertEqual(retry_context["playerEntry"], context["playerEntry"])
+        self.assertEqual(retry_context["earlier_player_entries"], ["I reach the fortress."])
+        self.assertNotIn("recent", retry_context)
         retry_prompt = chat.call_args.args[1][0]["content"]
         self.assertIn("repeats an earlier passage", retry_prompt)
         self.assertIn("after every stated event and outcome", retry_prompt)
