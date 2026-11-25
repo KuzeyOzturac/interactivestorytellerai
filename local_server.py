@@ -100,7 +100,6 @@ def review_story(context, turn):
         "current_state": context.get("currentState"),
         "latest_player_state_changes": context.get("playerStateChanges"),
         "cast": {person.get("id"): person.get("name") for person in context.get("cast", []) if isinstance(person, dict)},
-        "scene_before_latest_player_entry": context.get("scene"),
         "proposed_prose": turn.get("prose"),
         "proposed_scene": turn.get("scene"),
         "cast_updates": turn.get("characters"),
@@ -119,7 +118,8 @@ def review_story(context, turn):
             "Fail if the draft proceeds as though any stated action or outcome has yet to happen, "
             "contradicts custody or destination, assigns the player's action to someone else, lists a "
             "clearly absent character as present, or only repeats or analyzes the entry. Fail choices "
-            "that ask the player to complete an outcome already stated, or current facts that still assert "
+            "that ask the player to complete an outcome already stated. An unchanged location is valid unless "
+            "the entry establishes a different location. Fail current facts that still assert "
             "a state the entry changed. A summary can describe earlier events as history. An explicitly attempted "
             "action can fail. Ignore wording, grammar, punctuation, and formatting. If you cannot identify "
             "a concrete story contradiction or missing continuation, pass. Return passes and one short reason."
