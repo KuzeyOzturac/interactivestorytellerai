@@ -107,22 +107,17 @@ def review_story(context, turn):
         "proposed_choices": turn.get("choices"),
         "proposed_facts": turn.get("facts"),
         "proposed_summary": turn.get("summary"),
-        "prior_facts": context.get("facts"),
-        "retired_facts": turn.get("supersededFacts"),
     }
     return check_verdict(ollama_json(MODEL, [
         {"role": "system", "content": (
-            "The latest player entry is authoritative. Every action or outcome stated as happening "
-            "or completed already happened, even if earlier context differs. Only an explicit attempt "
-            "or intention leaves the outcome open. The proposed passage must start afterward. "
-            "Fail if the draft proceeds as though any stated action or outcome has yet to happen, "
-            "contradicts custody or destination, assigns the player's action to someone else, lists a "
-            "clearly absent character as present, or only repeats or analyzes the entry. Fail choices "
-            "that ask the player to complete an outcome already stated. An unchanged location is valid unless "
-            "the entry establishes a different location. Fail current facts that still assert "
-            "a state the entry changed. A summary can describe earlier events as history. An explicitly attempted "
-            "action can fail. Ignore wording, grammar, punctuation, and formatting. If you cannot identify "
-            "a concrete story contradiction or missing continuation, pass. Return passes and one short reason."
+            "Check for a concrete continuity error in the proposed turn. The player entry states what "
+            "already happened, including outcomes. Only explicit attempts or intentions leave outcomes open. "
+            "Pass when the passage follows those events, including when the effects are shown indirectly. "
+            "Reject only a specific contradiction, a passage that ignores the entry and continues the old "
+            "action, or a choice to redo an explicitly completed action. An unchanged location is fine "
+            "unless the entry establishes a different location. Ignore prose style and formatting. "
+            "If rejecting, name the player's exact established event and what part of the draft conflicts. "
+            "If there is no concrete conflict, return passes=true and an empty reason."
         )},
         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
     ], REVIEW_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 180}))
