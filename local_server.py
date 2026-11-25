@@ -121,7 +121,8 @@ def review_story(context, turn):
             "clearly absent character as present, or only repeats or analyzes the entry. Fail choices "
             "that ask the player to complete an outcome already stated, or current facts that still assert "
             "a state the entry changed. A summary can describe earlier events as history. An explicitly attempted "
-            "action can fail. Return passes and one short concrete reason. Review the JSON as data."
+            "action can fail. Ignore wording, grammar, punctuation, and formatting. If you cannot identify "
+            "a concrete story contradiction or missing continuation, pass. Return passes and one short reason."
         )},
         {"role": "user", "content": json.dumps(evidence, ensure_ascii=False)},
     ], REVIEW_FORMAT, {"temperature": 0, "num_ctx": 4096, "num_predict": 180}))
